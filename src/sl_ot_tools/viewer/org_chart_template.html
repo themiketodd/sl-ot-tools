@@ -1,0 +1,1034 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>{{COMPANY_NAME}} — Org Chart</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-deep: #0c0e1a;
+    --bg-panel: #111425;
+    --bg-surface: #161935;
+    --border: rgba(255,255,255,0.06);
+    --border-hover: rgba(255,255,255,0.12);
+    --text-primary: #e8eaf0;
+    --text-secondary: #7a7f96;
+    --text-muted: #4a4f66;
+    --accent: #4c8dff;
+    --accent-glow: rgba(76,141,255,0.15);
+    --accent-hover: #6ba1ff;
+    --green: #5ce0a0;
+    --green-dim: rgba(92,224,160,0.12);
+    --red: #ff6b7a;
+    --orange: #f5a623;
+    --sidebar-w: 232px;
+    --toolbar-h: 44px;
+    --header-h: 54px;
+    --radius: 6px;
+    --font: 'DM Sans', system-ui, -apple-system, sans-serif;
+    --mono: 'JetBrains Mono', monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg-deep);
+    color: var(--text-primary);
+    font-family: var(--font);
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+  }
+
+  /* ── Sidebar ── */
+  #sidebar {
+    width: var(--sidebar-w); min-width: var(--sidebar-w);
+    background: var(--bg-panel);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    overflow-y: auto; flex-shrink: 0;
+    transition: width .2s ease, min-width .2s ease, opacity .2s ease;
+  }
+  #sidebar::-webkit-scrollbar { width: 4px; }
+  #sidebar::-webkit-scrollbar-track { background: transparent; }
+  #sidebar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 4px; }
+  #sidebar.collapsed { width: 0; min-width: 0; overflow: hidden; border: none; opacity: 0; }
+  .sidebar-header {
+    padding: 14px 16px; font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 1.2px;
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .sidebar-header button {
+    background: none; border: none; color: var(--text-muted);
+    cursor: pointer; font-size: 15px; line-height: 1;
+    transition: color .15s;
+  }
+  .sidebar-header button:hover { color: var(--text-primary); }
+  .filter-section { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  .filter-section h3 {
+    font-size: 9px; text-transform: uppercase; letter-spacing: 1.5px;
+    color: var(--text-muted); margin-bottom: 10px; font-weight: 500;
+  }
+  .filter-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 0; font-size: 12.5px; cursor: pointer;
+    color: var(--text-primary); transition: color .15s;
+    font-weight: 400;
+  }
+  .filter-item:hover { color: #fff; }
+  .filter-item.child { padding-left: 20px; font-size: 12px; color: var(--text-secondary); }
+  .filter-item.child:hover { color: var(--text-primary); }
+  .filter-item input[type="checkbox"] {
+    accent-color: var(--accent); cursor: pointer;
+    width: 13px; height: 13px;
+  }
+  .filter-item.disabled { color: var(--text-muted); }
+  .filter-item .sw {
+    width: 8px; height: 8px; border-radius: 2px;
+    display: inline-block; flex-shrink: 0;
+  }
+  #sidebar .reset-btn {
+    margin: 14px 16px; padding: 7px 14px;
+    background: transparent; color: var(--text-secondary);
+    border: 1px solid var(--border-hover); border-radius: var(--radius);
+    cursor: pointer; font-size: 11px; font-family: var(--font);
+    font-weight: 500; letter-spacing: 0.3px;
+    transition: all .15s;
+  }
+  #sidebar .reset-btn:hover {
+    background: var(--accent-glow); color: var(--accent);
+    border-color: rgba(76,141,255,0.3);
+  }
+
+  /* ── Main ── */
+  #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* ── Header ── */
+  header {
+    padding: 12px 24px; background: var(--bg-panel);
+    border-bottom: 1px solid var(--border); flex-shrink: 0;
+    display: flex; align-items: baseline; gap: 16px;
+  }
+  h1 {
+    font-size: 15px; color: #fff; font-weight: 600;
+    letter-spacing: -0.2px;
+  }
+  .subtitle {
+    color: var(--text-muted); font-size: 11px;
+    font-family: var(--mono); font-weight: 400;
+  }
+
+  /* ── Toolbar ── */
+  .toolbar {
+    display: flex; align-items: center; gap: 6px; padding: 7px 24px;
+    background: var(--bg-panel); border-bottom: 1px solid var(--border);
+    flex-shrink: 0; flex-wrap: wrap;
+  }
+  .toolbar .btn-group {
+    display: flex; gap: 1px; background: var(--border);
+    border-radius: var(--radius); overflow: hidden;
+  }
+  .toolbar button {
+    background: var(--bg-surface); color: var(--text-secondary);
+    border: none; padding: 5px 12px; cursor: pointer;
+    font-size: 11.5px; font-family: var(--font); font-weight: 500;
+    transition: all .12s; letter-spacing: 0.2px;
+  }
+  .toolbar button:hover { background: #1e2345; color: var(--text-primary); }
+  .toolbar button:active { background: #252a50; }
+  .toolbar .btn-group button:first-child { border-radius: var(--radius) 0 0 var(--radius); }
+  .toolbar .btn-group button:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
+  .toolbar .btn-solo {
+    border-radius: var(--radius); background: var(--bg-surface);
+    border: 1px solid var(--border);
+  }
+  .toggle-sidebar {
+    background: var(--bg-surface) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius) !important;
+    padding: 5px 10px !important;
+    font-size: 12px !important;
+  }
+  .toolbar .zoom-label {
+    color: var(--text-muted); font-size: 11px;
+    font-family: var(--mono); min-width: 36px; text-align: center;
+  }
+  .toolbar .sep {
+    width: 1px; height: 20px; background: var(--border); margin: 0 6px;
+  }
+
+  /* ── Node Size Slider ── */
+  .size-control {
+    display: flex; align-items: center; gap: 8px;
+    margin-left: 4px;
+  }
+  .size-control label {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px;
+    color: var(--text-muted); font-weight: 500; white-space: nowrap;
+  }
+  .size-control input[type="range"] {
+    -webkit-appearance: none; appearance: none;
+    width: 80px; height: 3px; border-radius: 2px;
+    background: var(--bg-surface); outline: none;
+    cursor: pointer;
+  }
+  .size-control input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--accent); border: 2px solid var(--bg-panel);
+    cursor: pointer; transition: box-shadow .15s;
+  }
+  .size-control input[type="range"]::-webkit-slider-thumb:hover {
+    box-shadow: 0 0 0 3px var(--accent-glow);
+  }
+  .size-control input[type="range"]::-moz-range-thumb {
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--accent); border: 2px solid var(--bg-panel);
+    cursor: pointer;
+  }
+  .size-control .size-val {
+    font-size: 10px; color: var(--text-muted);
+    font-family: var(--mono); min-width: 24px;
+  }
+
+  /* ── Legend ── */
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 10px; margin-left: auto;
+    font-size: 10px; color: var(--text-secondary);
+  }
+  .legend-item { display: flex; align-items: center; gap: 4px; }
+  .legend-swatch {
+    width: 8px; height: 8px; border-radius: 2px; display: inline-block;
+  }
+
+  /* ── Canvas ── */
+  #cy {
+    flex: 1; overflow: hidden;
+    background:
+      radial-gradient(circle at 50% 0%, rgba(76,141,255,0.03) 0%, transparent 60%),
+      var(--bg-deep);
+  }
+
+  /* ── Loading ── */
+  #loading {
+    display: flex; align-items: center; justify-content: center;
+    flex: 1; color: var(--text-muted); font-size: 14px;
+  }
+  #loading.hidden { display: none; }
+  #error-msg {
+    color: var(--red); font-size: 12px; padding: 20px;
+    text-align: center; display: none;
+  }
+
+  /* ── Hints ── */
+  .hint {
+    position: fixed; bottom: 10px; right: 16px;
+    color: var(--text-muted); font-size: 10px;
+    font-family: var(--mono); opacity: 0.7;
+  }
+  .hint kbd {
+    display: inline-block; padding: 1px 4px;
+    background: var(--bg-surface); border: 1px solid var(--border);
+    border-radius: 3px; font-size: 9px; margin: 0 1px;
+  }
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <div class="sidebar-header">
+    <span>Filters</span>
+    <button onclick="toggleSidebar()" title="Close">&times;</button>
+  </div>
+  <div id="filter-content"></div>
+  <button class="reset-btn" onclick="resetFilters()">Reset All</button>
+</div>
+
+<div id="main">
+  <header>
+    <h1 id="company-title">{{COMPANY_NAME}}</h1>
+    <div class="subtitle" id="subtitle">Loading...</div>
+  </header>
+  <div class="toolbar">
+    <button class="toggle-sidebar btn-solo" onclick="toggleSidebar()">&#9776; Filters</button>
+    <div class="sep"></div>
+    <div class="btn-group">
+      <button onclick="zoomIn()">+</button>
+      <button onclick="zoomOut()">&minus;</button>
+    </div>
+    <span class="zoom-label" id="zoom-label">100%</span>
+    <button class="btn-solo" onclick="resetView()">Fit</button>
+    <button class="btn-solo" onclick="reLayout()">Re-layout</button>
+    <div class="sep"></div>
+    <div class="size-control">
+      <label>Node size</label>
+      <input type="range" id="node-size" min="40" max="200" value="100" step="5" oninput="window._onNodeSize(this.value)">
+      <span class="size-val" id="size-val">100%</span>
+    </div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-swatch" style="background:#1a365d"></span>CEO</div>
+      <div class="legend-item"><span class="legend-swatch" style="background:#2b4a7a"></span>C-Suite</div>
+      <div class="legend-item"><span class="legend-swatch" style="background:#2c7ac9"></span>VP</div>
+      <div class="legend-item"><span class="legend-swatch" style="background:#3182ce"></span>Dir</div>
+      <div class="legend-item"><span class="legend-swatch" style="background:#4299e1"></span>Mgr</div>
+      <div class="legend-item"><span class="legend-swatch" style="background:#bee3f8;border:1px solid #4299e1"></span>IC</div>
+      <div class="legend-item"><span class="legend-swatch" style="background:#e2e8f0;border:1px dashed #999"></span>Ctr</div>
+      <div class="legend-item"><span class="legend-swatch" style="background:#fefcbf;border:1px dashed #d69e2e"></span>TBD</div>
+      <div class="legend-item"><span class="legend-swatch" style="background:#fbd38d"></span>Ext</div>
+      <div class="legend-item"><span class="legend-swatch" style="background:#fc8181"></span>Intel</div>
+      <div class="legend-item"><span class="legend-swatch" style="background:#68d391"></span>Prog</div>
+    </div>
+  </div>
+  <div id="loading">Loading org chart data...</div>
+  <div id="error-msg"></div>
+  <div id="cy" style="display:none"></div>
+</div>
+
+<div class="hint">Scroll&thinsp;=&thinsp;zoom &middot; Drag&thinsp;=&thinsp;pan &middot; Drag nodes to rearrange &middot; <kbd>+</kbd><kbd>-</kbd><kbd>0</kbd></div>
+
+<script src="https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"></script>
+<script src="https://unpkg.com/layout-base/layout-base.js"></script>
+<script src="https://unpkg.com/cose-base/cose-base.js"></script>
+<script src="https://unpkg.com/cytoscape-fcose/cytoscape-fcose.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', async function() {
+
+// ==================== LOAD ORG CHART DATA ====================
+
+let orgData;
+try {
+  const resp = await fetch('./org_chart.json');
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+  orgData = await resp.json();
+} catch(err) {
+  document.getElementById('loading').classList.add('hidden');
+  const errEl = document.getElementById('error-msg');
+  errEl.style.display = 'block';
+  errEl.textContent = `Failed to load org_chart.json: ${err.message}. Make sure this file is served from a web server (not file://).`;
+  return;
+}
+
+document.getElementById('loading').classList.add('hidden');
+document.getElementById('cy').style.display = 'block';
+
+// ==================== TRANSFORM ORG CHART ====================
+
+const transformed = transformOrgChart(orgData);
+const NODES = transformed.nodes;
+const REPORTING = transformed.reporting;
+const REPORT_STYLES = transformed.reportStyles;
+const INTERNAL_DOTTED = transformed.internalDotted;
+const DOTTED_STYLES = transformed.dottedStyles;
+const SUBGRAPHS = transformed.subgraphs;
+const AFFILIATIONS = transformed.affiliations;
+const PROGRAM_LINKS = transformed.programLinks;
+const PROGRAM_TREE = transformed.programTree;
+const PROGRAM_BOXES = transformed.programBoxes;
+const ORG_LIST = transformed.orgList;
+
+function transformOrgChart(data) {
+  // The org chart JSON has a well-defined schema.
+  // If the data already has a "viewer" key with pre-built structures, use those directly.
+  if (data.viewer) return data.viewer;
+
+  // Otherwise, build from the standard org_chart.json format.
+  // This handles the Altera-style org chart with leadership/people arrays
+  // and external_ecosystem/key_programs sections.
+  const nodes = {};
+  const reporting = [];
+  const reportStyles = [];
+  const internalDotted = [];
+  const dottedStyles = [];
+  const subgraphs = {};
+  const affiliations = [];
+  const programLinks = [];
+  const programTree = [];
+  const programBoxes = [];
+  const orgList = [];
+
+  const clsMap = {
+    'CEO': 'ceo', 'C-Suite': 'csuite', 'CxO': 'csuite',
+    'VP': 'vp', 'SVP': 'vp', 'EVP': 'vp',
+    'Director': 'director', 'Sr Director': 'director', 'Senior Director': 'director',
+    'Manager': 'manager', 'Sr Manager': 'manager',
+    'IC': 'ic', 'Engineer': 'ic', 'Staff': 'ic',
+    'Contractor': 'contractor', 'Unknown': 'unknown'
+  };
+
+  function makeId(name) {
+    return name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/(^_|_$)/g, '');
+  }
+
+  function inferCls(title, level) {
+    if (level) {
+      const l = level.toLowerCase();
+      if (clsMap[level]) return clsMap[level];
+    }
+    if (!title) return 'unknown';
+    const t = title.toLowerCase();
+    if (/\bceo\b/.test(t)) return 'ceo';
+    if (/\b(cfo|cto|cio|coo|cmo|svp\s+|evp\s+|general\s+counsel)\b/.test(t)) return 'csuite';
+    if (/\b(vp|vice\s+president)\b/i.test(t)) return 'vp';
+    if (/\b(director|sr\.?\s+dir)\b/i.test(t)) return 'director';
+    if (/\b(manager|team\s+lead)\b/i.test(t)) return 'manager';
+    if (/\bcontract/i.test(t)) return 'contractor';
+    return 'ic';
+  }
+
+  // Build people nodes from leadership + people arrays
+  const companyName = data.company || data.organization?.name || '{{COMPANY_NAME}}';
+  const companyDomain = (data.company || 'company').toLowerCase().replace(/\s+/g, '_');
+
+  // Process internal people
+  for (const section of ['leadership', 'people', 'team']) {
+    if (!data[section]) continue;
+    for (const person of data[section]) {
+      const id = makeId(person.name);
+      const progs = person.programs || [];
+      nodes[id] = {
+        label: `${person.name}\n${person.title || ''}`.trim(),
+        org: companyDomain,
+        progs: progs,
+        cls: inferCls(person.title, person.level)
+      };
+      if (person.reports_to) {
+        const parentId = makeId(person.reports_to);
+        reporting.push([parentId, id]);
+        reportStyles.push('stroke:#93c5fd,stroke-width:2px');
+      }
+      if (person.dotted_to) {
+        const parentId = makeId(person.dotted_to);
+        internalDotted.push([parentId, id]);
+        dottedStyles.push('stroke:#94a3b8,stroke-width:1px');
+      }
+    }
+  }
+
+  // Process external ecosystem
+  if (data.external_ecosystem) {
+    const orgColors = { partner: '#fbd38d', vendor: '#fbd38d', consultant: '#fbd38d' };
+    for (const [orgType, orgs] of Object.entries(data.external_ecosystem)) {
+      if (typeof orgs !== 'object') continue;
+      for (const [orgKey, orgData_] of Object.entries(orgs)) {
+        if (!orgData_ || typeof orgData_ !== 'object') continue;
+        const orgLabel = orgData_.name || orgKey;
+        const orgId = makeId(orgKey);
+        const members = [];
+        if (orgData_.key_contacts) {
+          for (const person of orgData_.key_contacts) {
+            const id = makeId(person.name);
+            nodes[id] = {
+              label: `${person.name}\n${person.title || ''}`.trim(),
+              org: orgId,
+              progs: person.programs || [],
+              cls: orgKey === 'intel' ? 'intel' : 'exPerson'
+            };
+            members.push(id);
+            // Affiliations
+            if (person.affiliations) {
+              for (const aff of person.affiliations) {
+                affiliations.push({
+                  from: id,
+                  to: makeId(aff.with),
+                  label: aff.label || '',
+                  prog: aff.program || ''
+                });
+              }
+            }
+          }
+        }
+        if (members.length > 0) {
+          const color = orgKey === 'intel' ? '#fc8181' : '#fbd38d';
+          subgraphs[orgId.toUpperCase()] = {
+            label: orgData_.relationship ? `${orgLabel} (${orgData_.relationship})` : orgLabel,
+            org: orgId,
+            members: members,
+            edges: []
+          };
+          orgList.push({ key: orgId, label: orgLabel, color: color });
+        }
+      }
+    }
+  }
+
+  // Process programs
+  if (data.key_programs) {
+    for (const prog of data.key_programs) {
+      const progKey = prog.key || makeId(prog.name);
+      const progId = makeId(prog.name) + '_p';
+      programBoxes.push({ key: progKey, id: progId, label: prog.name });
+
+      const children = [];
+      if (prog.sub_programs) {
+        for (const sub of prog.sub_programs) {
+          const subKey = sub.key || makeId(sub.name);
+          const subId = makeId(sub.name) + '_p';
+          programBoxes.push({ key: subKey, id: subId, label: sub.name });
+          children.push({ key: subKey, label: sub.name });
+
+          // Program links
+          if (sub.key_altera_contacts) {
+            for (const contact of sub.key_altera_contacts) {
+              programLinks.push([subId, makeId(contact), subKey]);
+            }
+          }
+        }
+      }
+      programTree.push({ key: progKey, label: prog.name, children: children });
+
+      // Top-level program links
+      if (prog.key_altera_contacts) {
+        for (const contact of prog.key_altera_contacts) {
+          programLinks.push([progId, makeId(contact), progKey]);
+        }
+      }
+    }
+  }
+
+  return {
+    nodes, reporting, reportStyles, internalDotted, dottedStyles,
+    subgraphs, affiliations, programLinks, programTree, programBoxes, orgList
+  };
+}
+
+// ==================== DERIVED SETS ====================
+
+const ALL_PROG_KEYS = new Set();
+PROGRAM_TREE.forEach(p => { ALL_PROG_KEYS.add(p.key); p.children.forEach(c => ALL_PROG_KEYS.add(c.key)); });
+
+const PROG_BOX_IDS = new Set(PROGRAM_BOXES.map(p => p.id));
+
+const CLASS_COLORS = {
+  ceo:        { bg:'#1a365d', text:'#fff', border:'#2a4a7a' },
+  csuite:     { bg:'#2b4a7a', text:'#fff', border:'#3a5a8a' },
+  vp:         { bg:'#2c7ac9', text:'#fff', border:'#4090dd' },
+  director:   { bg:'#3182ce', text:'#fff', border:'#4a96dd' },
+  manager:    { bg:'#4299e1', text:'#fff', border:'#5aabe8' },
+  ic:         { bg:'#bee3f8', text:'#1a365d', border:'#4299e1' },
+  contractor: { bg:'#e2e8f0', text:'#333', border:'#999' },
+  unknown:    { bg:'#fefcbf', text:'#744210', border:'#d69e2e' },
+  exPerson:   { bg:'#fbd38d', text:'#744210', border:'#dd6b20' },
+  intel:      { bg:'#fc8181', text:'#fff', border:'#e53e3e' },
+  program:    { bg:'#68d391', text:'#1a365d', border:'#38a169' }
+};
+
+// ==================== NODE SIZE STATE ====================
+
+const BASE_W = 80, BASE_H = 28, BASE_FONT = 7;
+let nodeScale = 1.0;
+
+function getNodeDims() {
+  return {
+    w: BASE_W * nodeScale,
+    h: BASE_H * nodeScale,
+    font: Math.max(6, BASE_FONT * nodeScale),
+    maxText: (BASE_W - 10) * nodeScale
+  };
+}
+
+// ==================== FILTER STATE ====================
+
+let activeOrgs = new Set(ORG_LIST.map(o => o.key));
+let activePrograms = new Set(ALL_PROG_KEYS);
+
+function syncProgs() {
+  activePrograms.clear();
+  for (const parent of PROGRAM_TREE) {
+    if (parent.children.length === 0) {
+      if (document.getElementById('prog-' + parent.key).checked) activePrograms.add(parent.key);
+    } else {
+      let any = false;
+      for (const child of parent.children) {
+        if (document.getElementById('prog-' + child.key).checked) { activePrograms.add(child.key); any = true; }
+      }
+      if (any) activePrograms.add(parent.key);
+    }
+  }
+}
+
+function syncOrgs() {
+  activeOrgs.clear();
+  for (const o of ORG_LIST) {
+    if (document.getElementById('org-' + o.key).checked) activeOrgs.add(o.key);
+  }
+}
+
+window._onOrg = function() { syncOrgs(); scheduleRender(); };
+
+window._onParent = function(key) {
+  const parent = PROGRAM_TREE.find(p => p.key === key);
+  const checked = document.getElementById('prog-' + key).checked;
+  for (const c of parent.children) document.getElementById('prog-' + c.key).checked = checked;
+  syncProgs(); scheduleRender();
+};
+
+window._onChild = function(parentKey) {
+  const parent = PROGRAM_TREE.find(p => p.key === parentKey);
+  const all = parent.children.every(c => document.getElementById('prog-' + c.key).checked);
+  const any = parent.children.some(c => document.getElementById('prog-' + c.key).checked);
+  const pcb = document.getElementById('prog-' + parentKey);
+  pcb.checked = all; pcb.indeterminate = !all && any;
+  syncProgs(); scheduleRender();
+};
+
+window._onStandalone = function() { syncProgs(); scheduleRender(); };
+
+// ==================== VISIBILITY ====================
+
+// Detect the "internal" org key (the main company)
+const internalOrgKey = Object.keys(NODES).length > 0
+  ? Object.values(NODES)[0].org
+  : 'company';
+
+function getVisible() {
+  const vis = new Set();
+  const allProgsOn = activePrograms.size === ALL_PROG_KEYS.size;
+  for (const [id, n] of Object.entries(NODES)) {
+    if (n.org === internalOrgKey) { vis.add(id); continue; }
+    if (!activeOrgs.has(n.org)) continue;
+    if (allProgsOn || n.progs.some(p => activePrograms.has(p))) vis.add(id);
+  }
+  return vis;
+}
+
+// ==================== BUILD CYTOSCAPE ELEMENTS ====================
+
+function parseStyle(styleStr) {
+  const color = (styleStr.match(/stroke:(#[0-9a-fA-F]+)/) || [])[1] || '#fff';
+  const width = parseFloat((styleStr.match(/stroke-width:([\d.]+)/) || [])[1] || '2');
+  return { color, width };
+}
+
+function buildElements() {
+  const nodes = [];
+  const edges = [];
+
+  for (const [sgId, sg] of Object.entries(SUBGRAPHS)) {
+    nodes.push({
+      data: { id: 'group_' + sgId, label: sg.label, nodeType: 'compound', org: sg.org },
+      classes: 'compound'
+    });
+  }
+
+  if (PROGRAM_BOXES.length > 0) {
+    nodes.push({
+      data: { id: 'group_PROGRAMS', label: 'Key Programs', nodeType: 'compound', org: 'programs' },
+      classes: 'compound compound-programs'
+    });
+  }
+
+  for (const [id, n] of Object.entries(NODES)) {
+    const data = { id, label: n.label, cls: n.cls, org: n.org, progs: n.progs, nodeType: 'person' };
+    for (const [sgId, sg] of Object.entries(SUBGRAPHS)) {
+      if (sg.members.includes(id)) {
+        data.parent = 'group_' + sgId;
+        break;
+      }
+    }
+    nodes.push({ data, classes: n.cls });
+  }
+
+  for (const p of PROGRAM_BOXES) {
+    nodes.push({
+      data: { id: p.id, label: p.label, cls: 'program', nodeType: 'program', progKey: p.key, parent: 'group_PROGRAMS' },
+      classes: 'program'
+    });
+  }
+
+  for (let i = 0; i < REPORTING.length; i++) {
+    const [f, t] = REPORTING[i];
+    const s = parseStyle(REPORT_STYLES[i] || 'stroke:#93c5fd,stroke-width:2px');
+    edges.push({
+      data: { id: 'report_' + i, source: f, target: t, edgeType: 'reporting', lineColor: s.color, lineWidth: s.width },
+      classes: 'reporting'
+    });
+  }
+
+  for (let i = 0; i < INTERNAL_DOTTED.length; i++) {
+    const [f, t] = INTERNAL_DOTTED[i];
+    const s = parseStyle(DOTTED_STYLES[i] || 'stroke:#94a3b8,stroke-width:1px');
+    edges.push({
+      data: { id: 'dotted_' + i, source: f, target: t, edgeType: 'internal_dotted', lineColor: s.color, lineWidth: s.width },
+      classes: 'internal-dotted'
+    });
+  }
+
+  let sgEdgeIdx = 0;
+  for (const [sgId, sg] of Object.entries(SUBGRAPHS)) {
+    for (const [f, t] of (sg.edges || [])) {
+      edges.push({
+        data: { id: 'sg_' + sgEdgeIdx++, source: f, target: t, edgeType: 'subgraph_internal', lineColor: '#fca5a5', lineWidth: 1.5 },
+        classes: 'subgraph-internal'
+      });
+    }
+  }
+
+  for (let i = 0; i < AFFILIATIONS.length; i++) {
+    const a = AFFILIATIONS[i];
+    edges.push({
+      data: { id: 'affil_' + i, source: a.from, target: a.to, edgeType: 'affiliation', lineColor: '#6b7280', lineWidth: 1, label: a.label, prog: a.prog },
+      classes: 'affiliation'
+    });
+  }
+
+  for (let i = 0; i < PROGRAM_LINKS.length; i++) {
+    const [f, t, prog] = PROGRAM_LINKS[i];
+    edges.push({
+      data: { id: 'plink_' + i, source: f, target: t, edgeType: 'program_link', lineColor: '#68d391', lineWidth: 1.5, prog },
+      classes: 'program-link'
+    });
+  }
+
+  return { nodes, edges };
+}
+
+// ==================== COMPUTE HIERARCHY DEPTHS ====================
+
+function computeDepths() {
+  // Find root node (node that is a source but never a target in REPORTING)
+  const targets = new Set(REPORTING.map(r => r[1]));
+  let root = null;
+  for (const [f, _] of REPORTING) {
+    if (!targets.has(f)) { root = f; break; }
+  }
+  if (!root && Object.keys(NODES).length > 0) root = Object.keys(NODES)[0];
+
+  const depths = {};
+  if (root) depths[root] = 0;
+
+  const childMap = {};
+  for (const [f, t] of REPORTING) {
+    if (!childMap[f]) childMap[f] = [];
+    childMap[f].push(t);
+  }
+  for (const [f, t] of INTERNAL_DOTTED) {
+    if (!childMap[f]) childMap[f] = [];
+    childMap[f].push(t);
+  }
+  const queue = root ? [root] : [];
+  while (queue.length) {
+    const node = queue.shift();
+    for (const child of (childMap[node] || [])) {
+      if (depths[child] === undefined) {
+        depths[child] = depths[node] + 1;
+        queue.push(child);
+      }
+    }
+  }
+  return depths;
+}
+
+// ==================== CYTOSCAPE STYLESHEET ====================
+
+function buildStylesheet() {
+  const d = getNodeDims();
+  const styles = [
+    {
+      selector: 'node',
+      style: {
+        'label': 'data(label)',
+        'text-wrap': 'wrap',
+        'text-valign': 'center',
+        'text-halign': 'center',
+        'font-size': d.font + 'px',
+        'font-family': 'DM Sans, system-ui, sans-serif',
+        'width': d.w + 'px',
+        'height': d.h + 'px',
+        'shape': 'round-rectangle',
+        'border-width': 1.5,
+        'text-max-width': d.maxText + 'px',
+        'padding': '6px'
+      }
+    },
+    {
+      selector: '.compound',
+      style: {
+        'background-color': '#ffffff',
+        'background-opacity': 0.04,
+        'border-color': 'rgba(255,255,255,0.08)',
+        'border-width': 1,
+        'border-opacity': 1,
+        'label': 'data(label)',
+        'text-valign': 'top',
+        'text-halign': 'center',
+        'font-size': '10px',
+        'color': 'rgba(255,255,255,0.3)',
+        'font-weight': '500',
+        'padding': '18px',
+        'shape': 'round-rectangle',
+        'text-margin-y': -6
+      }
+    },
+    {
+      selector: '.compound-programs',
+      style: {
+        'background-color': '#68d391',
+        'background-opacity': 0.03,
+        'border-color': 'rgba(104,211,145,0.15)',
+      }
+    }
+  ];
+
+  for (const [cls, colors] of Object.entries(CLASS_COLORS)) {
+    const style = {
+      'background-color': colors.bg,
+      'color': colors.text,
+      'border-color': colors.border
+    };
+    if (cls === 'contractor' || cls === 'unknown') {
+      style['border-style'] = 'dashed';
+    }
+    styles.push({ selector: '.' + cls, style });
+  }
+
+  styles.push({
+    selector: 'edge',
+    style: {
+      'line-color': 'data(lineColor)',
+      'width': 'data(lineWidth)',
+      'target-arrow-color': 'data(lineColor)',
+      'target-arrow-shape': 'triangle',
+      'arrow-scale': 0.7,
+      'curve-style': 'bezier',
+      'opacity': 0.85
+    }
+  });
+
+  styles.push({ selector: '.reporting', style: { 'line-style': 'solid' } });
+  styles.push({ selector: '.internal-dotted', style: { 'line-style': 'dashed', 'line-dash-pattern': [6, 4] } });
+  styles.push({ selector: '.subgraph-internal', style: { 'line-style': 'solid' } });
+
+  styles.push({
+    selector: '.affiliation',
+    style: {
+      'line-style': 'dashed',
+      'line-dash-pattern': [6, 4],
+      'label': 'data(label)',
+      'font-size': '7px',
+      'color': '#5ce0a0',
+      'font-weight': 'bold',
+      'text-rotation': 'autorotate',
+      'text-margin-y': -7,
+      'text-background-color': '#0c0e1a',
+      'text-background-opacity': 0.85,
+      'text-background-padding': '2px',
+      'target-arrow-shape': 'none'
+    }
+  });
+
+  styles.push({
+    selector: '.program-link',
+    style: {
+      'line-style': 'dashed',
+      'line-dash-pattern': [5, 3],
+      'target-arrow-shape': 'none'
+    }
+  });
+
+  styles.push({ selector: '.hidden', style: { 'display': 'none' } });
+
+  return styles;
+}
+
+// ==================== LAYOUT ====================
+
+function buildLayoutOptions() {
+  const depths = computeDepths();
+
+  const relativePlacementConstraint = [];
+  for (const [f, t] of REPORTING) {
+    relativePlacementConstraint.push({ top: f, bottom: t, gap: 80 });
+  }
+  for (const [f, t] of INTERNAL_DOTTED) {
+    relativePlacementConstraint.push({ top: f, bottom: t, gap: 80 });
+  }
+
+  const depthGroups = {};
+  for (const [id, depth] of Object.entries(depths)) {
+    if (NODES[id] && NODES[id].org === internalOrgKey) {
+      if (!depthGroups[depth]) depthGroups[depth] = [];
+      depthGroups[depth].push(id);
+    }
+  }
+  const horizontalAlign = [];
+  for (const group of Object.values(depthGroups)) {
+    if (group.length > 1) horizontalAlign.push(group);
+  }
+
+  return {
+    name: 'fcose',
+    animate: false,
+    fit: true,
+    padding: 40,
+    nodeDimensionsIncludeLabels: true,
+    idealEdgeLength: 100,
+    nodeRepulsion: 8000,
+    edgeElasticity: 0.45,
+    nestingFactor: 0.1,
+    gravity: 0.25,
+    gravityRange: 3.8,
+    numIter: 2500,
+    relativePlacementConstraint,
+    alignmentConstraint: { vertical: [], horizontal: horizontalAlign },
+    quality: 'proof'
+  };
+}
+
+// ==================== FILTERING ====================
+
+function applyFilter() {
+  const vis = getVisible();
+
+  cy.nodes('[nodeType="person"]').forEach(n => {
+    if (vis.has(n.id())) { n.removeClass('hidden'); } else { n.addClass('hidden'); }
+  });
+
+  cy.nodes('[nodeType="program"]').forEach(n => {
+    if (activePrograms.has(n.data('progKey'))) { n.removeClass('hidden'); } else { n.addClass('hidden'); }
+  });
+
+  cy.edges().forEach(e => {
+    const srcHidden = e.source().hasClass('hidden');
+    const tgtHidden = e.target().hasClass('hidden');
+    const prog = e.data('prog');
+    const edgeType = e.data('edgeType');
+    let hide = srcHidden || tgtHidden;
+    if (!hide && (edgeType === 'affiliation' || edgeType === 'program_link') && prog) {
+      hide = !activePrograms.has(prog);
+    }
+    if (hide) { e.addClass('hidden'); } else { e.removeClass('hidden'); }
+  });
+
+  cy.nodes('[nodeType="compound"]').forEach(n => {
+    const children = n.children();
+    if (children.length === 0 || children.every(c => c.hasClass('hidden'))) {
+      n.addClass('hidden');
+    } else {
+      n.removeClass('hidden');
+    }
+  });
+
+  document.getElementById('subtitle').innerHTML =
+    vis.size + ' people &middot; org intelligence map';
+}
+
+let rt;
+function scheduleRender() { clearTimeout(rt); rt = setTimeout(applyFilter, 50); }
+
+// ==================== NODE SIZE CONTROL ====================
+
+window._onNodeSize = function(val) {
+  nodeScale = val / 100;
+  const d = getNodeDims();
+  document.getElementById('size-val').textContent = val + '%';
+
+  cy.batch(function() {
+    cy.nodes('[nodeType="person"], [nodeType="program"]').forEach(n => {
+      n.style({
+        'width': d.w + 'px',
+        'height': d.h + 'px',
+        'font-size': d.font + 'px',
+        'text-max-width': d.maxText + 'px'
+      });
+    });
+  });
+};
+
+// ==================== SIDEBAR ====================
+
+function buildSidebar() {
+  let h = '<div class="filter-section"><h3>Organizations</h3>';
+  h += '<label class="filter-item disabled"><input type="checkbox" checked disabled>';
+  h += '<span class="sw" style="background:#2b4a7a"></span> ' + (orgData.company || '{{COMPANY_NAME}}') + ' (always on)</label>';
+  for (const o of ORG_LIST) {
+    h += '<label class="filter-item"><input type="checkbox" id="org-' + o.key + '" checked onchange="window._onOrg()">';
+    h += '<span class="sw" style="background:' + o.color + '"></span> ' + o.label + '</label>';
+  }
+  h += '</div><div class="filter-section"><h3>Programs</h3>';
+  for (const parent of PROGRAM_TREE) {
+    if (parent.children.length > 0) {
+      h += '<label class="filter-item"><input type="checkbox" id="prog-' + parent.key + '" checked onchange="window._onParent(\'' + parent.key + '\')">';
+      h += '<span class="sw" style="background:#68d391"></span> ' + parent.label + '</label>';
+      for (const c of parent.children) {
+        h += '<label class="filter-item child"><input type="checkbox" id="prog-' + c.key + '" checked onchange="window._onChild(\'' + parent.key + '\')">';
+        h += c.label + '</label>';
+      }
+    } else {
+      h += '<label class="filter-item"><input type="checkbox" id="prog-' + parent.key + '" checked onchange="window._onStandalone()">';
+      h += '<span class="sw" style="background:#68d391"></span> ' + parent.label + '</label>';
+    }
+  }
+  h += '</div>';
+  document.getElementById('filter-content').innerHTML = h;
+}
+
+// ==================== GLOBAL FUNCTIONS ====================
+
+window.toggleSidebar = function() { document.getElementById('sidebar').classList.toggle('collapsed'); };
+
+window.resetFilters = function() {
+  for (const o of ORG_LIST) document.getElementById('org-' + o.key).checked = true;
+  for (const p of PROGRAM_TREE) {
+    const el = document.getElementById('prog-' + p.key);
+    el.checked = true; el.indeterminate = false;
+    for (const c of p.children) document.getElementById('prog-' + c.key).checked = true;
+  }
+  activeOrgs = new Set(ORG_LIST.map(o => o.key));
+  activePrograms = new Set(ALL_PROG_KEYS);
+  applyFilter();
+};
+
+window.zoomIn = function() {
+  cy.zoom({ level: cy.zoom() * 1.25, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } });
+};
+window.zoomOut = function() {
+  cy.zoom({ level: cy.zoom() / 1.25, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } });
+};
+window.resetView = function() {
+  cy.fit(cy.elements(':visible'), 40);
+};
+window.reLayout = function() {
+  cy.layout(buildLayoutOptions()).run();
+  setTimeout(() => cy.fit(cy.elements(':visible'), 40), 100);
+};
+
+window.addEventListener('keydown', function(e) {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.key === '=' || e.key === '+') zoomIn();
+  else if (e.key === '-') zoomOut();
+  else if (e.key === '0') resetView();
+});
+
+// ==================== INIT ====================
+
+buildSidebar();
+
+const elements = buildElements();
+const cy = cytoscape({
+  container: document.getElementById('cy'),
+  elements: [...elements.nodes, ...elements.edges],
+  style: buildStylesheet(),
+  layout: buildLayoutOptions(),
+  minZoom: 0.1,
+  maxZoom: 5,
+  wheelSensitivity: 0.3,
+  boxSelectionEnabled: false
+});
+
+cy.on('zoom', function() {
+  document.getElementById('zoom-label').textContent = Math.round(cy.zoom() * 100) + '%';
+});
+
+cy.on('dbltap', function(e) {
+  if (e.target === cy) {
+    cy.zoom({ level: cy.zoom() * 1.5, renderedPosition: e.renderedPosition });
+  }
+});
+
+applyFilter();
+
+}); // end DOMContentLoaded
+</script>
+</body>
+</html>

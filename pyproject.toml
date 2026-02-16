@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sl-ot-tools"
+version = "0.1.0"
+description = "Silver Lake Operating Technology tools for portfolio company engagement management"
+requires-python = ">=3.9"
+license = "MIT"
+dependencies = [
+    "python-docx>=1.1.0",
+    "markdown-it-py>=3.0.0",
+    "mdit-py-plugins>=0.4.0",
+]
+
+[project.scripts]
+sl-ot-tools = "sl_ot_tools.cli:main"
+sl-ot-sync = "sl_ot_tools.sync.entry:main"
+sl-ot-read-emails = "sl_ot_tools.email.entry:main"
+sl-ot-process-people = "sl_ot_tools.email.process_people:main"
+sl-ot-md2docx = "sl_ot_tools.docgen.md2docx:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+sl_ot_tools = [
+    "sync/*.sh",
+    "email/*.sh",
+    "email/*.ps1",
+    "viewer/*.html",
+    "templates/**/*",
+]
