@@ -12,6 +12,7 @@ dependencies = [
     "python-docx>=1.1.0",
     "markdown-it-py>=3.0.0",
     "mdit-py-plugins>=0.4.0",
+    "tomli>=2.0.0; python_version < '3.11'",
 ]
 
 [project.scripts]
@@ -19,7 +20,9 @@ sl-ot-tools = "sl_ot_tools.cli:main"
 sl-ot-sync = "sl_ot_tools.sync.entry:main"
 sl-ot-read-emails = "sl_ot_tools.email.entry:main"
 sl-ot-process-people = "sl_ot_tools.email.process_people:main"
+sl-ot-draft-email = "sl_ot_tools.email.draft_entry:main"
 sl-ot-md2docx = "sl_ot_tools.docgen.md2docx:main"
+sl-ot-settings = "sl_ot_tools.config.settings:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

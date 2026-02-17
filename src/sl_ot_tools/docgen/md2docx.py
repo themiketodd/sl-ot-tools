@@ -59,7 +59,17 @@ def main():
     md_text = input_path.read_text(encoding="utf-8")
     author = get_git_author()
 
-    render_markdown_to_docx(md_text, str(output_path), author=author)
+    # Check for user-configured Word template
+    template_path = None
+    try:
+        from ..config.settings import get_setting
+        tmpl = get_setting("docgen.word_template", "")
+        if tmpl and Path(tmpl).exists():
+            template_path = tmpl
+    except Exception:
+        pass
+
+    render_markdown_to_docx(md_text, str(output_path), author=author, template_path=template_path)
 
     print(f"Saved: {output_path}")
     print(f"Author: {author}")

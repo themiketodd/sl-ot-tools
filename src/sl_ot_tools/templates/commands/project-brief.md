@@ -2,15 +2,17 @@ Generate a current-state PROJECT_BRIEF.md for one or more workstreams by synthes
 
 Arguments: $ARGUMENTS should be a workstream slug (from engagement_config.json) or `all` (default: `all`).
 
+{{ENGAGEMENT_RESOLUTION}}
+
 ## Setup
 
 1. Parse arguments for which workstream(s) to brief
-2. Read `{{ENGAGEMENT_DIR}}/engagement_config.json` to resolve workstream paths
+2. Read `<engagement>/engagement_config.json` to resolve workstream paths
 3. Read the org chart at `{{COMPANY_DIR}}/org_chart.json` for program context
 
 ## For each requested workstream
 
-4. Resolve the knowledge log path: `{{ENGAGEMENT_DIR}}/<workstream.output_dir>/KNOWLEDGE_LOG.md`
+4. Resolve the knowledge log path: `<engagement>/<workstream.output_dir>/KNOWLEDGE_LOG.md`
 5. If the log doesn't exist, report "No knowledge log found for <workstream.label>" and skip
 6. Read the full KNOWLEDGE_LOG.md
 7. Read the org chart's `key_programs` section for programs listed in the workstream's config
@@ -68,7 +70,7 @@ Stats table:
 
 ## Writing
 
-8. Write the brief to `{{ENGAGEMENT_DIR}}/<workstream.output_dir>/PROJECT_BRIEF.md`, replacing any existing file
+8. Write the brief to `<engagement>/<workstream.output_dir>/PROJECT_BRIEF.md`, replacing any existing file
 9. Report what was generated: workstream name, entry count, date range, any notable gaps
 
 ## When generating for `all`

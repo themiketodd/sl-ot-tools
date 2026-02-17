@@ -36,12 +36,16 @@ def create_parser() -> MarkdownIt:
 class DocxRenderer:
     """Walks markdown-it tokens and builds a python-docx Document."""
 
-    def __init__(self, author: str = "", title: str = ""):
-        self.doc = Document()
+    def __init__(self, author: str = "", title: str = "", template_path: str | None = None):
+        if template_path:
+            self.doc = Document(template_path)
+        else:
+            self.doc = Document()
         self.author = author
         self.title = title
         self._extracted_title = ""
-        self._setup_styles()
+        if not template_path:
+            self._setup_styles()
 
         # State
         self._current_paragraph = None
@@ -525,6 +529,7 @@ def render_markdown_to_docx(
     output_path: str,
     author: str = "",
     title: str = "",
+    template_path: str | None = None,
 ) -> None:
     """Parse markdown text and create a DOCX file.
 
@@ -533,9 +538,10 @@ def render_markdown_to_docx(
         output_path: Path to write the .docx file.
         author: Document author name.
         title: Document title (auto-extracted from first H1 if not given).
+        template_path: Optional path to a .docx/.dotx template file.
     """
     parser = create_parser()
     tokens = parser.parse(md_text)
-    renderer = DocxRenderer(author=author, title=title)
+    renderer = DocxRenderer(author=author, title=title, template_path=template_path)
     doc = renderer.render(tokens)
     doc.save(output_path)

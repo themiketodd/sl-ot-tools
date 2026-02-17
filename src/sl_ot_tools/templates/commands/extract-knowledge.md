@@ -6,13 +6,15 @@ Arguments: $ARGUMENTS should be the number of days to look back (default: 7). Fl
 
 The knowledge extractor is Claude-driven (not a Python script). Classification and extraction happen inline as you read each email.
 
+{{ENGAGEMENT_RESOLUTION}}
+
 ## Setup
 
 1. Parse arguments for days (default 7), whether to reprocess, and whether to use review mode
 2. Run the email reader: `sl-ot-read-emails --days <N> --skip-inline`
 3. Capture the output directory path (last line of output)
 4. Read `index.json` from the output directory
-5. Read `{{ENGAGEMENT_DIR}}/engagement_config.json` for workstream classification rules
+5. Read `<engagement>/engagement_config.json` for workstream classification rules
 6. Read `.local/knowledge_checkpoint.json` if it exists (skip if reprocessing)
 7. Read the org chart at `{{COMPANY_DIR}}/org_chart.json` to resolve program membership
 
@@ -69,7 +71,7 @@ An email may yield 0 nuggets (routine/FYI with no extractable knowledge) or mult
 ## Writing to KNOWLEDGE_LOG.md
 
 For each workstream with accepted nuggets:
-- Resolve the output path: `{{ENGAGEMENT_DIR}}/<workstream.output_dir>/KNOWLEDGE_LOG.md`
+- Resolve the output path: `<engagement>/<workstream.output_dir>/KNOWLEDGE_LOG.md`
 - If the file doesn't exist, create it with this header:
 
 ```markdown

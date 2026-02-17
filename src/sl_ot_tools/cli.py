@@ -6,6 +6,7 @@ Commands:
     init company <slug>      Create a new company repo structure
     init engagement <name>   Create a new engagement directory
     setup                    Interactive setup (user config, skills, viewer)
+    settings                 Configure user-level settings (~/.config/sl-ot-tools/)
     check                    Verify installation and config
     generate-viewer          Regenerate org chart viewer from template
 """
@@ -305,6 +306,13 @@ def cmd_setup():
     _write_json(user_config_path, user_config)
     print(f"\nSaved: {user_config_path}")
 
+    # Mention settings if not configured
+    from .config.settings import SETTINGS_FILE
+    if not SETTINGS_FILE.exists():
+        print()
+        print("Tip: Run 'sl-ot-tools settings' to configure user-level preferences")
+        print("     (timezone, PowerShell path, Word template, email defaults)")
+
     # Install skills
     _install_skills(repo_root, engagements)
 
@@ -479,17 +487,33 @@ def _install_skills(repo_root, engagements):
         print("WARNING: Skill templates not found")
         return
 
+    from .config.settings import PROMPTS_DIR
+
+    # Build engagement resolution block for skills that operate per-engagement
+    if engagements:
+        eng_list = ", ".join(f"`{e}`" for e in sorted(engagements))
+        engagement_resolution = (
+            f"## Engagement resolution\n\n"
+            f"This skill operates within an engagement directory. "
+            f"Available engagements: {eng_list}.\n\n"
+            f"To determine which engagement to use (`<engagement>` in paths below):\n"
+            f"1. If the current working directory is inside an engagement directory, use that engagement\n"
+            f"2. If there's only one engagement, use it automatically\n"
+            f"3. Otherwise, ask the user which engagement to target"
+        )
+    else:
+        engagement_resolution = (
+            "## Engagement resolution\n\n"
+            "No engagements found. Run `sl-ot-tools init engagement <name>` first, "
+            "then `sl-ot-tools setup` to reinstall skills."
+        )
+
     installed = 0
     for template_file in templates_dir.glob("*.md"):
         content = template_file.read_text(encoding="utf-8")
         content = content.replace("{{COMPANY_DIR}}", "_company")
-
-        # For engagement-specific tokens, use the first engagement or a placeholder
-        if engagements:
-            content = content.replace("{{ENGAGEMENT_DIR}}", engagements[0])
-        else:
-            content = content.replace("{{ENGAGEMENT_DIR}}", "<engagement>")
-
+        content = content.replace("{{PROMPTS_DIR}}", str(PROMPTS_DIR))
+        content = content.replace("{{ENGAGEMENT_RESOLUTION}}", engagement_resolution)
         content = content.replace("{{COMPANY_NAME}}", company_name)
 
         target_file = target_dir / template_file.name
@@ -520,6 +544,7 @@ def main():
         print("  init company <slug>      Create a new company repo")
         print("  init engagement <name>   Create a new engagement directory")
         print("  setup                    Interactive setup (user config, skills, viewer)")
+        print("  settings                 Configure user-level settings")
         print("  check                    Verify installation and config")
         print("  generate-viewer          Regenerate org chart viewer")
         print()
@@ -542,6 +567,10 @@ def main():
             print(f"Unknown init type: {args[1]}")
             print("Usage: sl-ot-tools init <company|engagement> <name>")
             sys.exit(1)
+
+    elif args[0] == "settings":
+        from .config.settings import init_settings
+        init_settings()
 
     elif args[0] == "setup":
         cmd_setup()

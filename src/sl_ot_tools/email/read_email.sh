@@ -15,14 +15,40 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-POWERSHELL="/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/powershell.exe"
 PS_SCRIPT="$SCRIPT_DIR/read_email.ps1"
 
-# --- Defaults ---
-DAYS=7
-FOLDERS="Inbox,Archive"
-SKIP_INLINE=""
-ACCOUNT=""
+# Read settings from ~/.config/sl-ot-tools/settings.toml (with hardcoded fallbacks)
+POWERSHELL=$(python3 -c "
+from sl_ot_tools.config.settings import get_setting
+print(get_setting('email.powershell_path', '/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/powershell.exe'))
+" 2>/dev/null || echo "/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/powershell.exe")
+
+# --- Defaults (from settings, CLI args override) ---
+DAYS=$(python3 -c "
+from sl_ot_tools.config.settings import get_setting
+print(get_setting('email.default_days', 7))
+" 2>/dev/null || echo "7")
+
+FOLDERS=$(python3 -c "
+from sl_ot_tools.config.settings import get_setting
+print(get_setting('email.default_folders', 'Inbox,Archive'))
+" 2>/dev/null || echo "Inbox,Archive")
+
+_SKIP_INLINE_SETTING=$(python3 -c "
+from sl_ot_tools.config.settings import get_setting
+v = get_setting('email.skip_inline', False)
+print('yes' if v else 'no')
+" 2>/dev/null || echo "no")
+if [[ "$_SKIP_INLINE_SETTING" == "yes" ]]; then
+    SKIP_INLINE="-SkipInline"
+else
+    SKIP_INLINE=""
+fi
+
+ACCOUNT=$(python3 -c "
+from sl_ot_tools.config.settings import get_setting
+print(get_setting('email.default_account', ''))
+" 2>/dev/null || echo "")
 
 # --- Parse arguments ---
 while [[ $# -gt 0 ]]; do
