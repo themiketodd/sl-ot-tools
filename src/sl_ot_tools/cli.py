@@ -479,6 +479,64 @@ def _generate_viewer(company_dir):
     output_path.write_text(html, encoding="utf-8")
     print(f"Generated viewer: {output_path}")
 
+    # Generate engagement_map.json from engagement configs
+    _generate_engagement_map(company_dir)
+
+
+def _generate_engagement_map(company_dir):
+    """Scan all engagement_config.json files and build engagement_map.json."""
+    repo_root = company_dir.parent
+    engagements = []
+
+    for p in sorted(repo_root.iterdir()):
+        if not p.is_dir():
+            continue
+        cfg_path = p / "engagement_config.json"
+        if not cfg_path.exists():
+            continue
+
+        try:
+            cfg = load_json(cfg_path)
+        except Exception as e:
+            print(f"  WARNING: Skipping {p.name}/engagement_config.json: {e}")
+            continue
+
+        eng_key = cfg.get("engagement", p.name)
+        eng_label = cfg.get("engagement_label", eng_key.replace("-", " ").title())
+        eng_sp_url = cfg.get("sharepoint_url", "")
+
+        workstreams = []
+        for ws_key, ws_data in cfg.get("workstreams", {}).items():
+            if not isinstance(ws_data, dict):
+                continue
+            ws_entry = {
+                "key": ws_key,
+                "label": ws_data.get("label", ws_key),
+                "programs": ws_data.get("programs", []),
+                "people_associations": ws_data.get("people_associations", []),
+            }
+            ws_sp_url = ws_data.get("sharepoint_url", "")
+            if ws_sp_url:
+                ws_entry["sharepoint_url"] = ws_sp_url
+            workstreams.append(ws_entry)
+
+        eng_entry = {
+            "key": eng_key,
+            "label": eng_label,
+            "workstreams": workstreams,
+        }
+        if eng_sp_url:
+            eng_entry["sharepoint_url"] = eng_sp_url
+        engagements.append(eng_entry)
+
+    if engagements:
+        engagement_map = {"engagements": engagements}
+        output_path = company_dir / "engagement_map.json"
+        _write_json(output_path, engagement_map)
+        print(f"Generated engagement map: {output_path} ({len(engagements)} engagement(s))")
+    else:
+        print("  No engagement configs found — skipping engagement_map.json")
+
 
 # ── skill installation ────────────────────────────────────────
 

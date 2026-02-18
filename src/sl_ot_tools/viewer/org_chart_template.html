@@ -227,6 +227,14 @@
     color: var(--text-muted); font-size: 10px;
     font-family: var(--mono); opacity: 0.7;
   }
+  .sp-link {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 16px; height: 16px; flex-shrink: 0; margin-left: auto;
+    color: var(--text-muted); opacity: 0.6; transition: opacity .15s, color .15s;
+    text-decoration: none;
+  }
+  .sp-link:hover { opacity: 1; color: var(--accent); }
+  .sp-link svg { width: 12px; height: 12px; }
   .hint kbd {
     display: inline-block; padding: 1px 4px;
     background: var(--bg-surface); border: 1px solid var(--border);
@@ -266,6 +274,11 @@
       <input type="range" id="node-size" min="40" max="200" value="100" step="5" oninput="window._onNodeSize(this.value)">
       <span class="size-val" id="size-val">100%</span>
     </div>
+    <div class="size-control">
+      <label>Text size</label>
+      <input type="range" id="text-size" min="50" max="200" value="100" step="5" oninput="window._onTextSize(this.value)">
+      <span class="size-val" id="text-size-val">100%</span>
+    </div>
     <div class="legend">
       <div class="legend-item"><span class="legend-swatch" style="background:#1a365d"></span>CEO</div>
       <div class="legend-item"><span class="legend-swatch" style="background:#2b4a7a"></span>C-Suite</div>
@@ -297,6 +310,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 // ==================== LOAD ORG CHART DATA ====================
 
 let orgData;
+let engagementMap = null;
 try {
   const resp = await fetch('./org_chart.json');
   if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
@@ -308,6 +322,12 @@ try {
   errEl.textContent = `Failed to load org_chart.json: ${err.message}. Make sure this file is served from a web server (not file://).`;
   return;
 }
+
+// Try to load engagement map (optional — falls back to program-based sidebar)
+try {
+  const resp2 = await fetch('./engagement_map.json');
+  if (resp2.ok) engagementMap = await resp2.json();
+} catch(e) { /* ignore — will use program-based fallback */ }
 
 document.getElementById('loading').classList.add('hidden');
 document.getElementById('cy').style.display = 'block';
@@ -390,6 +410,7 @@ function transformOrgChart(data) {
         label: `${person.name}\n${person.title || ''}`.trim(),
         org: companyDomain,
         progs: progs,
+        email: person.email || '',
         cls: inferCls(person.title, person.level)
       };
       if (person.reports_to) {
@@ -517,13 +538,14 @@ const CLASS_COLORS = {
 
 const BASE_W = 80, BASE_H = 28, BASE_FONT = 7;
 let nodeScale = 1.0;
+let textScale = 1.0;
 
 function getNodeDims() {
   return {
     w: BASE_W * nodeScale,
     h: BASE_H * nodeScale,
-    font: Math.max(6, BASE_FONT * nodeScale),
-    maxText: (BASE_W - 10) * nodeScale
+    font: Math.max(6, BASE_FONT * nodeScale * textScale),
+    maxText: (BASE_W - 10) * nodeScale * textScale
   };
 }
 
@@ -531,6 +553,13 @@ function getNodeDims() {
 
 let activeOrgs = new Set(ORG_LIST.map(o => o.key));
 let activePrograms = new Set(ALL_PROG_KEYS);
+
+// Engagement filter state (populated if engagementMap is available)
+const ENGAGEMENT_DATA = engagementMap ? engagementMap.engagements : [];
+const ALL_WS_KEYS = new Set();
+ENGAGEMENT_DATA.forEach(e => e.workstreams.forEach(ws => ALL_WS_KEYS.add(e.key + '/' + ws.key)));
+let activeWorkstreams = new Set(ALL_WS_KEYS);
+const useEngagements = ENGAGEMENT_DATA.length > 0;
 
 function syncProgs() {
   activePrograms.clear();
@@ -554,6 +583,33 @@ function syncOrgs() {
   }
 }
 
+function syncEngagements() {
+  activeWorkstreams.clear();
+  activePrograms.clear();
+  for (const eng of ENGAGEMENT_DATA) {
+    let anyWs = false;
+    for (const ws of eng.workstreams) {
+      const wsFullKey = eng.key + '/' + ws.key;
+      const el = document.getElementById('ws-' + wsFullKey);
+      if (el && el.checked) {
+        activeWorkstreams.add(wsFullKey);
+        anyWs = true;
+        for (const p of ws.programs) activePrograms.add(p);
+      }
+    }
+    // Update parent checkbox state
+    const engEl = document.getElementById('eng-' + eng.key);
+    if (engEl) {
+      const allChecked = eng.workstreams.every(ws => {
+        const el = document.getElementById('ws-' + eng.key + '/' + ws.key);
+        return el && el.checked;
+      });
+      engEl.checked = allChecked;
+      engEl.indeterminate = !allChecked && anyWs;
+    }
+  }
+}
+
 window._onOrg = function() { syncOrgs(); scheduleRender(); };
 
 window._onParent = function(key) {
@@ -574,6 +630,20 @@ window._onChild = function(parentKey) {
 
 window._onStandalone = function() { syncProgs(); scheduleRender(); };
 
+window._onEngagement = function(engKey) {
+  const eng = ENGAGEMENT_DATA.find(e => e.key === engKey);
+  const checked = document.getElementById('eng-' + engKey).checked;
+  for (const ws of eng.workstreams) {
+    const el = document.getElementById('ws-' + engKey + '/' + ws.key);
+    if (el) el.checked = checked;
+  }
+  syncEngagements(); scheduleRender();
+};
+
+window._onWorkstream = function(engKey) {
+  syncEngagements(); scheduleRender();
+};
+
 // ==================== VISIBILITY ====================
 
 // Detect the "internal" org key (the main company)
@@ -581,14 +651,76 @@ const internalOrgKey = Object.keys(NODES).length > 0
   ? Object.values(NODES)[0].org
   : 'company';
 
+// Build parent/child maps for smart filtering
+const parentMap = {};  // child -> parent
+const childMap = {};   // parent -> [children]
+for (const [f, t] of REPORTING) {
+  parentMap[t] = f;
+  if (!childMap[f]) childMap[f] = [];
+  childMap[f].push(t);
+}
+
 function getVisible() {
   const vis = new Set();
-  const allProgsOn = activePrograms.size === ALL_PROG_KEYS.size;
-  for (const [id, n] of Object.entries(NODES)) {
-    if (n.org === internalOrgKey) { vis.add(id); continue; }
-    if (!activeOrgs.has(n.org)) continue;
-    if (allProgsOn || n.progs.some(p => activePrograms.has(p))) vis.add(id);
+  const allProgsOn = useEngagements
+    ? activeWorkstreams.size === ALL_WS_KEYS.size
+    : activePrograms.size === ALL_PROG_KEYS.size;
+
+  if (allProgsOn) {
+    // All filters on — show everyone (original behavior)
+    for (const [id, n] of Object.entries(NODES)) {
+      if (n.org === internalOrgKey) { vis.add(id); continue; }
+      if (!activeOrgs.has(n.org)) continue;
+      vis.add(id);
+    }
+    return vis;
   }
+
+  if (useEngagements) {
+    // Smart filtering: collect people_associations emails from selected workstreams
+    const assocEmails = new Set();
+    for (const eng of ENGAGEMENT_DATA) {
+      for (const ws of eng.workstreams) {
+        if (activeWorkstreams.has(eng.key + '/' + ws.key)) {
+          for (const email of (ws.people_associations || [])) {
+            assocEmails.add(email.toLowerCase());
+          }
+        }
+      }
+    }
+
+    // Find directly matched internal people (by program or email association)
+    const directMatch = new Set();
+    for (const [id, n] of Object.entries(NODES)) {
+      if (n.org !== internalOrgKey) continue;
+      if (n.progs.some(p => activePrograms.has(p))) { directMatch.add(id); continue; }
+      if (n.email && assocEmails.has(n.email.toLowerCase())) { directMatch.add(id); }
+    }
+
+    // Expand: include 1 level up (direct manager) and 1 level down (direct reports)
+    for (const id of directMatch) {
+      vis.add(id);
+      // One level up
+      if (parentMap[id]) vis.add(parentMap[id]);
+      // One level down
+      if (childMap[id]) {
+        for (const child of childMap[id]) vis.add(child);
+      }
+    }
+  } else {
+    // Legacy program-based filtering: internals always visible
+    for (const [id, n] of Object.entries(NODES)) {
+      if (n.org === internalOrgKey) { vis.add(id); continue; }
+    }
+  }
+
+  // External people: filter by org + program intersection (same as before)
+  for (const [id, n] of Object.entries(NODES)) {
+    if (n.org === internalOrgKey) continue;
+    if (!activeOrgs.has(n.org)) continue;
+    if (n.progs.some(p => activePrograms.has(p))) vis.add(id);
+  }
+
   return vis;
 }
 
@@ -935,7 +1067,29 @@ window._onNodeSize = function(val) {
   });
 };
 
+window._onTextSize = function(val) {
+  textScale = val / 100;
+  const d = getNodeDims();
+  document.getElementById('text-size-val').textContent = val + '%';
+
+  cy.batch(function() {
+    cy.nodes('[nodeType="person"], [nodeType="program"]').forEach(n => {
+      n.style({
+        'font-size': d.font + 'px',
+        'text-max-width': d.maxText + 'px'
+      });
+    });
+  });
+};
+
 // ==================== SIDEBAR ====================
+
+const SP_ICON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8.5l2.5-2.5M9.5 5L12 2.5M12 2.5h-3M12 2.5v3M10 8v4.5a1 1 0 01-1 1H3.5a1 1 0 01-1-1V6.5a1 1 0 011-1H8"/></svg>';
+
+function spLink(url) {
+  if (!url) return '';
+  return ' <a class="sp-link" href="' + url + '" target="_blank" rel="noopener" title="Open in SharePoint">' + SP_ICON + '</a>';
+}
 
 function buildSidebar() {
   let h = '<div class="filter-section"><h3>Organizations</h3>';
@@ -945,21 +1099,48 @@ function buildSidebar() {
     h += '<label class="filter-item"><input type="checkbox" id="org-' + o.key + '" checked onchange="window._onOrg()">';
     h += '<span class="sw" style="background:' + o.color + '"></span> ' + o.label + '</label>';
   }
-  h += '</div><div class="filter-section"><h3>Programs</h3>';
-  for (const parent of PROGRAM_TREE) {
-    if (parent.children.length > 0) {
-      h += '<label class="filter-item"><input type="checkbox" id="prog-' + parent.key + '" checked onchange="window._onParent(\'' + parent.key + '\')">';
-      h += '<span class="sw" style="background:#68d391"></span> ' + parent.label + '</label>';
-      for (const c of parent.children) {
-        h += '<label class="filter-item child"><input type="checkbox" id="prog-' + c.key + '" checked onchange="window._onChild(\'' + parent.key + '\')">';
-        h += c.label + '</label>';
-      }
-    } else {
-      h += '<label class="filter-item"><input type="checkbox" id="prog-' + parent.key + '" checked onchange="window._onStandalone()">';
-      h += '<span class="sw" style="background:#68d391"></span> ' + parent.label + '</label>';
-    }
-  }
   h += '</div>';
+
+  if (useEngagements) {
+    // Engagement / Workstream tree
+    h += '<div class="filter-section"><h3>Engagements</h3>';
+    for (const eng of ENGAGEMENT_DATA) {
+      h += '<div class="filter-item" style="display:flex;align-items:center">';
+      h += '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;flex:1">';
+      h += '<input type="checkbox" id="eng-' + eng.key + '" checked onchange="window._onEngagement(\'' + eng.key + '\')">';
+      h += '<span class="sw" style="background:#4c8dff"></span> ' + eng.label + '</label>';
+      h += spLink(eng.sharepoint_url);
+      h += '</div>';
+      for (const ws of eng.workstreams) {
+        const wsFullKey = eng.key + '/' + ws.key;
+        h += '<div class="filter-item child" style="display:flex;align-items:center">';
+        h += '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;flex:1">';
+        h += '<input type="checkbox" id="ws-' + wsFullKey + '" checked onchange="window._onWorkstream(\'' + eng.key + '\')">';
+        h += ws.label + '</label>';
+        h += spLink(ws.sharepoint_url);
+        h += '</div>';
+      }
+    }
+    h += '</div>';
+  } else {
+    // Fallback: program-based sidebar
+    h += '<div class="filter-section"><h3>Programs</h3>';
+    for (const parent of PROGRAM_TREE) {
+      if (parent.children.length > 0) {
+        h += '<label class="filter-item"><input type="checkbox" id="prog-' + parent.key + '" checked onchange="window._onParent(\'' + parent.key + '\')">';
+        h += '<span class="sw" style="background:#68d391"></span> ' + parent.label + '</label>';
+        for (const c of parent.children) {
+          h += '<label class="filter-item child"><input type="checkbox" id="prog-' + c.key + '" checked onchange="window._onChild(\'' + parent.key + '\')">';
+          h += c.label + '</label>';
+        }
+      } else {
+        h += '<label class="filter-item"><input type="checkbox" id="prog-' + parent.key + '" checked onchange="window._onStandalone()">';
+        h += '<span class="sw" style="background:#68d391"></span> ' + parent.label + '</label>';
+      }
+    }
+    h += '</div>';
+  }
+
   document.getElementById('filter-content').innerHTML = h;
 }
 
@@ -969,13 +1150,27 @@ window.toggleSidebar = function() { document.getElementById('sidebar').classList
 
 window.resetFilters = function() {
   for (const o of ORG_LIST) document.getElementById('org-' + o.key).checked = true;
-  for (const p of PROGRAM_TREE) {
-    const el = document.getElementById('prog-' + p.key);
-    el.checked = true; el.indeterminate = false;
-    for (const c of p.children) document.getElementById('prog-' + c.key).checked = true;
-  }
   activeOrgs = new Set(ORG_LIST.map(o => o.key));
-  activePrograms = new Set(ALL_PROG_KEYS);
+
+  if (useEngagements) {
+    for (const eng of ENGAGEMENT_DATA) {
+      const engEl = document.getElementById('eng-' + eng.key);
+      if (engEl) { engEl.checked = true; engEl.indeterminate = false; }
+      for (const ws of eng.workstreams) {
+        const wsEl = document.getElementById('ws-' + eng.key + '/' + ws.key);
+        if (wsEl) wsEl.checked = true;
+      }
+    }
+    activeWorkstreams = new Set(ALL_WS_KEYS);
+    syncEngagements();
+  } else {
+    for (const p of PROGRAM_TREE) {
+      const el = document.getElementById('prog-' + p.key);
+      el.checked = true; el.indeterminate = false;
+      for (const c of p.children) document.getElementById('prog-' + c.key).checked = true;
+    }
+    activePrograms = new Set(ALL_PROG_KEYS);
+  }
   applyFilter();
 };
 
