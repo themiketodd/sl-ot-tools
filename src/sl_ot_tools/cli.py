@@ -456,7 +456,11 @@ def cmd_generate_viewer():
 
 
 def _generate_viewer(company_dir):
-    """Generate viewer HTML from template + company config."""
+    """Generate viewer HTML from template + company config.
+
+    Embeds org_chart.json and engagement_map.json directly into the HTML
+    so the viewer works from file:// without a web server.
+    """
     template_path = _get_viewer_template()
     if not template_path.exists():
         print(f"WARNING: Viewer template not found at {template_path}")
@@ -472,19 +476,44 @@ def _generate_viewer(company_dir):
         except Exception:
             pass
 
+    # Build engagement map data (also writes the standalone JSON file)
+    engagement_map = _generate_engagement_map(company_dir)
+
+    # Read org chart data for embedding
+    org_chart_path = company_dir / "org_chart.json"
+    org_chart_json = "null"
+    if org_chart_path.exists():
+        try:
+            org_data = load_json(org_chart_path)
+            org_chart_json = json.dumps(org_data, ensure_ascii=False)
+        except Exception as e:
+            print(f"  WARNING: Could not read org_chart.json for embedding: {e}")
+
+    engagement_map_json = json.dumps(engagement_map, ensure_ascii=False) if engagement_map else "null"
+
+    # Build embedded data script block
+    embed_script = (
+        '<script>\n'
+        f'window.__EMBEDDED_ORG_DATA__ = {org_chart_json};\n'
+        f'window.__EMBEDDED_ENGAGEMENT_MAP__ = {engagement_map_json};\n'
+        '</script>\n'
+    )
+
     template = template_path.read_text(encoding="utf-8")
     html = template.replace("{{COMPANY_NAME}}", company_name)
+    html = html.replace("{{EMBEDDED_DATA}}", embed_script)
 
     output_path = company_dir / "org_chart_viewer.html"
     output_path.write_text(html, encoding="utf-8")
     print(f"Generated viewer: {output_path}")
 
-    # Generate engagement_map.json from engagement configs
-    _generate_engagement_map(company_dir)
-
 
 def _generate_engagement_map(company_dir):
-    """Scan all engagement_config.json files and build engagement_map.json."""
+    """Scan all engagement_config.json files and build engagement_map.json.
+
+    Returns the engagement map dict, or None if no engagements found.
+    Also writes the standalone JSON file for web-server-based serving.
+    """
     repo_root = company_dir.parent
     engagements = []
 
@@ -534,8 +563,10 @@ def _generate_engagement_map(company_dir):
         output_path = company_dir / "engagement_map.json"
         _write_json(output_path, engagement_map)
         print(f"Generated engagement map: {output_path} ({len(engagements)} engagement(s))")
+        return engagement_map
     else:
         print("  No engagement configs found — skipping engagement_map.json")
+        return None
 
 
 # ── skill installation ────────────────────────────────────────

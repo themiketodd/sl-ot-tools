@@ -300,6 +300,7 @@
 
 <div class="hint">Scroll&thinsp;=&thinsp;zoom &middot; Drag&thinsp;=&thinsp;pan &middot; Drag nodes to rearrange &middot; <kbd>+</kbd><kbd>-</kbd><kbd>0</kbd></div>
 
+{{EMBEDDED_DATA}}
 <script src="https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"></script>
 <script src="https://unpkg.com/layout-base/layout-base.js"></script>
 <script src="https://unpkg.com/cose-base/cose-base.js"></script>
@@ -309,25 +310,30 @@ document.addEventListener('DOMContentLoaded', async function() {
 
 // ==================== LOAD ORG CHART DATA ====================
 
-let orgData;
-let engagementMap = null;
-try {
-  const resp = await fetch('./org_chart.json');
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
-  orgData = await resp.json();
-} catch(err) {
-  document.getElementById('loading').classList.add('hidden');
-  const errEl = document.getElementById('error-msg');
-  errEl.style.display = 'block';
-  errEl.textContent = `Failed to load org_chart.json: ${err.message}. Make sure this file is served from a web server (not file://).`;
-  return;
+// Use embedded data if available, otherwise fetch from files
+let orgData = window.__EMBEDDED_ORG_DATA__ || null;
+let engagementMap = window.__EMBEDDED_ENGAGEMENT_MAP__ || null;
+
+if (!orgData) {
+  try {
+    const resp = await fetch('./org_chart.json');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+    orgData = await resp.json();
+  } catch(err) {
+    document.getElementById('loading').classList.add('hidden');
+    const errEl = document.getElementById('error-msg');
+    errEl.style.display = 'block';
+    errEl.textContent = `Failed to load org_chart.json: ${err.message}. Make sure this file is served from a web server (not file://), or regenerate the viewer with sl-ot-tools generate-viewer.`;
+    return;
+  }
 }
 
-// Try to load engagement map (optional — falls back to program-based sidebar)
-try {
-  const resp2 = await fetch('./engagement_map.json');
-  if (resp2.ok) engagementMap = await resp2.json();
-} catch(e) { /* ignore — will use program-based fallback */ }
+if (!engagementMap) {
+  try {
+    const resp2 = await fetch('./engagement_map.json');
+    if (resp2.ok) engagementMap = await resp2.json();
+  } catch(e) { /* ignore — will use program-based fallback */ }
+}
 
 document.getElementById('loading').classList.add('hidden');
 document.getElementById('cy').style.display = 'block';
