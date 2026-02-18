@@ -403,8 +403,8 @@ function transformOrgChart(data) {
   }
 
   // Build people nodes from leadership + people arrays
-  const companyName = data.company || data.organization?.name || '{{COMPANY_NAME}}';
-  const companyDomain = (data.company || 'company').toLowerCase().replace(/\s+/g, '_');
+  const companyName = data.company || data.meta?.company?.name || data.organization?.name || '{{COMPANY_NAME}}';
+  const companyDomain = (data.company || data.meta?.company?.name || 'company').toLowerCase().replace(/\s+/g, '_');
 
   // Process internal people
   for (const section of ['leadership', 'people', 'team']) {
@@ -420,14 +420,20 @@ function transformOrgChart(data) {
         cls: inferCls(person.title, person.level)
       };
       if (person.reports_to) {
-        const parentId = makeId(person.reports_to);
-        reporting.push([parentId, id]);
-        reportStyles.push('stroke:#93c5fd,stroke-width:2px');
+        const cleanReportsTo = person.reports_to.replace(/\s*\(.*?\)\s*$/, '');
+        const parentId = makeId(cleanReportsTo);
+        if (parentId !== id) {
+          reporting.push([parentId, id]);
+          reportStyles.push('stroke:#93c5fd,stroke-width:2px');
+        }
       }
       if (person.dotted_to) {
-        const parentId = makeId(person.dotted_to);
-        internalDotted.push([parentId, id]);
-        dottedStyles.push('stroke:#94a3b8,stroke-width:1px');
+        const cleanDottedTo = person.dotted_to.replace(/\s*\(.*?\)\s*$/, '');
+        const parentId = makeId(cleanDottedTo);
+        if (parentId !== id) {
+          internalDotted.push([parentId, id]);
+          dottedStyles.push('stroke:#94a3b8,stroke-width:1px');
+        }
       }
     }
   }
