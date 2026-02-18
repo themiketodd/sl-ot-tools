@@ -1047,8 +1047,9 @@ function applyFilter() {
     }
   });
 
+  const ver = window.__EMBEDDED_VERSION__ ? ' &middot; v' + window.__EMBEDDED_VERSION__ : '';
   document.getElementById('subtitle').innerHTML =
-    vis.size + ' people &middot; org intelligence map';
+    vis.size + ' people &middot; org intelligence map' + ver;
 }
 
 let rt;

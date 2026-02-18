@@ -494,6 +494,7 @@ def _generate_viewer(company_dir):
     # Build embedded data script block
     embed_script = (
         '<script>\n'
+        f'window.__EMBEDDED_VERSION__ = "{__version__}";\n'
         f'window.__EMBEDDED_ORG_DATA__ = {org_chart_json};\n'
         f'window.__EMBEDDED_ENGAGEMENT_MAP__ = {engagement_map_json};\n'
         '</script>\n'
