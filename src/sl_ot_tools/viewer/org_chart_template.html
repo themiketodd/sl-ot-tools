@@ -439,35 +439,31 @@ function transformOrgChart(data) {
   }
 
   // Process external ecosystem
+  // Supports both nested format (orgType -> orgs -> contacts) and flat format (orgKey -> {key_contacts})
   if (data.external_ecosystem) {
-    const orgColors = { partner: '#fbd38d', vendor: '#fbd38d', consultant: '#fbd38d' };
-    for (const [orgType, orgs] of Object.entries(data.external_ecosystem)) {
-      if (typeof orgs !== 'object') continue;
-      for (const [orgKey, orgData_] of Object.entries(orgs)) {
-        if (!orgData_ || typeof orgData_ !== 'object') continue;
+    function processExtOrg(orgKey, orgData_, parentKey) {
+      if (!orgData_ || typeof orgData_ !== 'object') return;
+      if (orgData_.key_contacts) {
+        // This is an org with contacts
         const orgLabel = orgData_.name || orgKey;
         const orgId = makeId(orgKey);
         const members = [];
-        if (orgData_.key_contacts) {
-          for (const person of orgData_.key_contacts) {
-            const id = makeId(person.name);
-            nodes[id] = {
-              label: `${person.name}\n${person.title || ''}`.trim(),
-              org: orgId,
-              progs: person.programs || [],
-              cls: orgKey === 'intel' ? 'intel' : 'exPerson'
-            };
-            members.push(id);
-            // Affiliations
-            if (person.affiliations) {
-              for (const aff of person.affiliations) {
-                affiliations.push({
-                  from: id,
-                  to: makeId(aff.with),
-                  label: aff.label || '',
-                  prog: aff.program || ''
-                });
-              }
+        for (const person of orgData_.key_contacts) {
+          const id = makeId(person.name);
+          nodes[id] = {
+            label: `${person.name}\n${person.title || ''}`.trim(),
+            org: orgId,
+            progs: person.programs || [],
+            email: person.email || '',
+            cls: orgKey === 'intel' ? 'intel' : 'exPerson'
+          };
+          members.push(id);
+          if (person.affiliations) {
+            for (const aff of person.affiliations) {
+              affiliations.push({
+                from: id, to: makeId(aff.with),
+                label: aff.label || '', prog: aff.program || ''
+              });
             }
           }
         }
@@ -475,45 +471,88 @@ function transformOrgChart(data) {
           const color = orgKey === 'intel' ? '#fc8181' : '#fbd38d';
           subgraphs[orgId.toUpperCase()] = {
             label: orgData_.relationship ? `${orgLabel} (${orgData_.relationship})` : orgLabel,
-            org: orgId,
-            members: members,
-            edges: []
+            org: orgId, members, edges: []
           };
-          orgList.push({ key: orgId, label: orgLabel, color: color });
+          orgList.push({ key: orgId, label: orgLabel, color });
+        }
+      } else {
+        // Nested: this level contains sub-orgs
+        for (const [subKey, subData] of Object.entries(orgData_)) {
+          if (typeof subData === 'object') processExtOrg(subKey, subData, orgKey);
         }
       }
     }
+    for (const [key, val] of Object.entries(data.external_ecosystem)) {
+      if (typeof val !== 'object') continue;
+      processExtOrg(key, val, null);
+    }
   }
 
-  // Process programs
+  // Process programs — supports both array format and dict format
   if (data.key_programs) {
-    for (const prog of data.key_programs) {
+    // Normalize to array of {key, name, ...}
+    let progArray;
+    if (Array.isArray(data.key_programs)) {
+      progArray = data.key_programs;
+    } else {
+      progArray = Object.entries(data.key_programs).map(([k, v]) => ({
+        key: k, name: v.description || k, ...v
+      }));
+    }
+
+    // Build reverse map: program -> people (from key_altera_contacts)
+    const progToPeople = {};
+
+    for (const prog of progArray) {
       const progKey = prog.key || makeId(prog.name);
-      const progId = makeId(prog.name) + '_p';
-      programBoxes.push({ key: progKey, id: progId, label: prog.name });
+      const progId = progKey + '_p';
+      programBoxes.push({ key: progKey, id: progId, label: prog.name || progKey });
 
       const children = [];
-      if (prog.sub_programs) {
-        for (const sub of prog.sub_programs) {
-          const subKey = sub.key || makeId(sub.name);
-          const subId = makeId(sub.name) + '_p';
-          programBoxes.push({ key: subKey, id: subId, label: sub.name });
-          children.push({ key: subKey, label: sub.name });
+      // Handle sub_programs (array) or parent references (dict format)
+      const subProgs = prog.sub_programs || [];
+      if (Array.isArray(subProgs)) {
+        for (const sub of subProgs) {
+          const subKey = typeof sub === 'string' ? sub : (sub.key || makeId(sub.name));
+          const subObj = typeof sub === 'string'
+            ? progArray.find(p => p.key === sub) || { key: sub, name: sub }
+            : sub;
+          const subId = subKey + '_p';
+          if (!programBoxes.find(p => p.key === subKey)) {
+            programBoxes.push({ key: subKey, id: subId, label: subObj.name || subKey });
+          }
+          children.push({ key: subKey, label: subObj.name || subKey });
 
-          // Program links
-          if (sub.key_altera_contacts) {
-            for (const contact of sub.key_altera_contacts) {
+          if (subObj.key_altera_contacts) {
+            for (const contact of subObj.key_altera_contacts) {
               programLinks.push([subId, makeId(contact), subKey]);
+              if (!progToPeople[subKey]) progToPeople[subKey] = [];
+              progToPeople[subKey].push(makeId(contact));
             }
           }
         }
       }
-      programTree.push({ key: progKey, label: prog.name, children: children });
 
-      // Top-level program links
+      // Skip programs that are sub-programs of another (they're children, not top-level)
+      if (!prog.parent) {
+        programTree.push({ key: progKey, label: prog.name || progKey, children });
+      }
+
+      // Top-level program contacts
       if (prog.key_altera_contacts) {
         for (const contact of prog.key_altera_contacts) {
           programLinks.push([progId, makeId(contact), progKey]);
+          if (!progToPeople[progKey]) progToPeople[progKey] = [];
+          progToPeople[progKey].push(makeId(contact));
+        }
+      }
+    }
+
+    // Reverse-map: assign programs to people who don't already have them
+    for (const [progKey, personIds] of Object.entries(progToPeople)) {
+      for (const pid of personIds) {
+        if (nodes[pid] && !nodes[pid].progs.includes(progKey)) {
+          nodes[pid].progs.push(progKey);
         }
       }
     }
