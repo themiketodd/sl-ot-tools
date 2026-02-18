@@ -5,7 +5,8 @@ sl-ot-tools — CLI for Silver Lake Operating Technology tools.
 Commands:
     init company <slug>      Create a new company repo structure
     init engagement <name>   Create a new engagement directory
-    setup                    Interactive setup (user config, skills, viewer)
+    setup                    Update skills and viewer (safe to re-run)
+    setup --reconfigure      Re-prompt for user config values
     settings                 Configure user-level settings (~/.config/sl-ot-tools/)
     check                    Verify installation and config
     generate-viewer          Regenerate org chart viewer from template
@@ -251,8 +252,12 @@ exec sl-ot-sync pull -c "$(dirname "$0")/sync-map.conf" "$@"
 
 # ── setup ─────────────────────────────────────────────────────
 
-def cmd_setup():
-    """Interactive setup: user config, skills, viewer."""
+def cmd_setup(reconfigure=False, force_skills=False):
+    """Interactive setup: user config, skills, viewer.
+
+    If user config already exists, skips interactive prompts and just
+    updates skills + viewer. Use --reconfigure to re-prompt for config.
+    """
     repo_root = find_repo_root()
     if not repo_root:
         print("ERROR: Not inside a company repo (_company/ not found)")
@@ -264,24 +269,12 @@ def cmd_setup():
 
     # Load existing user config or create new
     user_config_path = local_dir / "user-config.json"
-    if user_config_path.exists():
+    has_existing_config = user_config_path.exists()
+
+    if has_existing_config:
         user_config = load_json(user_config_path)
-        print(f"Found existing user config: {user_config_path}")
     else:
         user_config = {}
-
-    # Prompt for user name
-    current_user = user_config.get("user", os.environ.get("USER", ""))
-    user = input(f"User name [{current_user}]: ").strip() or current_user
-    user_config["user"] = user
-
-    # Prompt for OneDrive root
-    current_root = user_config.get("onedrive_root", "")
-    print()
-    print("OneDrive root path (the folder where SharePoint shortcuts are mounted).")
-    print("Example: /mnt/c/Users/jane.doe/OneDrive - Silver Lake/OT Sharepoint Shortcuts")
-    onedrive_root = input(f"OneDrive root [{current_root}]: ").strip() or current_root
-    user_config["onedrive_root"] = onedrive_root
 
     # Find all engagements
     engagements = []
@@ -289,22 +282,44 @@ def cmd_setup():
         if p.is_dir() and (p / "engagement_config.json").exists():
             engagements.append(p.name)
 
-    # Prompt for per-engagement SharePoint mappings
-    mappings = user_config.get("onedrive_mappings", {})
-    if engagements:
+    if not has_existing_config or reconfigure:
+        # Interactive config prompts
+        if has_existing_config:
+            print(f"Reconfiguring: {user_config_path}")
         print()
-        print("SharePoint mappings (relative path under OneDrive root for each engagement).")
-        print("Example: Companies/Altera/Enclave")
-        for eng in sorted(engagements):
-            current_mapping = mappings.get(eng, "")
-            mapping = input(f"  {eng} [{current_mapping}]: ").strip() or current_mapping
-            if mapping:
-                mappings[eng] = mapping
-    user_config["onedrive_mappings"] = mappings
 
-    # Write user config
-    _write_json(user_config_path, user_config)
-    print(f"\nSaved: {user_config_path}")
+        # Prompt for user name
+        current_user = user_config.get("user", os.environ.get("USER", ""))
+        user = input(f"User name [{current_user}]: ").strip() or current_user
+        user_config["user"] = user
+
+        # Prompt for OneDrive root
+        current_root = user_config.get("onedrive_root", "")
+        print()
+        print("OneDrive root path (the folder where SharePoint shortcuts are mounted).")
+        print("Example: /mnt/c/Users/jane.doe/OneDrive - Silver Lake/OT Sharepoint Shortcuts")
+        onedrive_root = input(f"OneDrive root [{current_root}]: ").strip() or current_root
+        user_config["onedrive_root"] = onedrive_root
+
+        # Prompt for per-engagement SharePoint mappings
+        mappings = user_config.get("onedrive_mappings", {})
+        if engagements:
+            print()
+            print("SharePoint mappings (relative path under OneDrive root for each engagement).")
+            print("Example: Companies/Altera/Enclave")
+            for eng in sorted(engagements):
+                current_mapping = mappings.get(eng, "")
+                mapping = input(f"  {eng} [{current_mapping}]: ").strip() or current_mapping
+                if mapping:
+                    mappings[eng] = mapping
+        user_config["onedrive_mappings"] = mappings
+
+        # Write user config
+        _write_json(user_config_path, user_config)
+        print(f"\nSaved: {user_config_path}")
+    else:
+        print(f"Using existing config: {user_config_path}")
+        print(f"  (run 'sl-ot-tools setup --reconfigure' to change)")
 
     # Mention settings if not configured
     from .config.settings import SETTINGS_FILE
@@ -314,7 +329,7 @@ def cmd_setup():
         print("     (timezone, PowerShell path, Word template, email defaults)")
 
     # Install skills
-    _install_skills(repo_root, engagements)
+    _install_skills(repo_root, engagements, force=force_skills)
 
     # Generate viewer
     _generate_viewer(company_dir)
@@ -467,8 +482,13 @@ def _generate_viewer(company_dir):
 
 # ── skill installation ────────────────────────────────────────
 
-def _install_skills(repo_root, engagements):
-    """Install Claude Code skills from templates."""
+def _install_skills(repo_root, engagements, force=False):
+    """Install Claude Code skills from templates.
+
+    Detects user-modified skill files and preserves them (with a warning)
+    unless force=True. Custom skills (files not matching any template)
+    are always preserved.
+    """
     templates_dir = _get_templates_dir() / "commands"
     target_dir = repo_root / ".claude" / "commands"
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -509,6 +529,7 @@ def _install_skills(repo_root, engagements):
         )
 
     installed = 0
+    skipped = 0
     for template_file in templates_dir.glob("*.md"):
         content = template_file.read_text(encoding="utf-8")
         content = content.replace("{{COMPANY_DIR}}", "_company")
@@ -517,10 +538,27 @@ def _install_skills(repo_root, engagements):
         content = content.replace("{{COMPANY_NAME}}", company_name)
 
         target_file = target_dir / template_file.name
+
+        # Check for user modifications before overwriting
+        if target_file.exists() and not force:
+            existing = target_file.read_text(encoding="utf-8")
+            if existing == content:
+                installed += 1  # already up to date
+                continue
+            # File differs — could be user edits or stale template output.
+            # Back up and warn rather than silently overwriting.
+            backup_file = target_file.with_suffix(".md.bak")
+            backup_file.write_text(existing, encoding="utf-8")
+            print(f"  Updated: {template_file.name} (backup: {backup_file.name})")
+
         target_file.write_text(content, encoding="utf-8")
         installed += 1
 
-    print(f"Installed {installed} skills to .claude/commands/")
+    if skipped:
+        print(f"Installed {installed} skills, skipped {skipped} with local edits")
+        print(f"  Use 'sl-ot-tools setup --force' to overwrite all skills")
+    else:
+        print(f"Installed {installed} skills to .claude/commands/")
 
 
 # ── helpers ───────────────────────────────────────────────────
@@ -543,7 +581,9 @@ def main():
         print("Commands:")
         print("  init company <slug>      Create a new company repo")
         print("  init engagement <name>   Create a new engagement directory")
-        print("  setup                    Interactive setup (user config, skills, viewer)")
+        print("  setup                    Update skills and viewer (re-run safely)")
+        print("    --reconfigure          Re-prompt for user config values")
+        print("    --force                Overwrite modified skill files")
         print("  settings                 Configure user-level settings")
         print("  check                    Verify installation and config")
         print("  generate-viewer          Regenerate org chart viewer")
@@ -573,7 +613,9 @@ def main():
         init_settings()
 
     elif args[0] == "setup":
-        cmd_setup()
+        reconfigure = "--reconfigure" in args
+        force_skills = "--force" in args
+        cmd_setup(reconfigure=reconfigure, force_skills=force_skills)
 
     elif args[0] == "check":
         success = cmd_check()
