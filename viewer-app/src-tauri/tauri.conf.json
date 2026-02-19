@@ -1,0 +1,50 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicegui/tauri/dev/tooling/cli/schema.json",
+  "productName": "SL OT Viewer",
+  "version": "0.1.0",
+  "identifier": "com.silverlake.ot-viewer",
+  "build": {
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Silver Lake OT Viewer",
+        "width": 1400,
+        "height": 900,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  },
+  "plugins": {
+    "fs": {
+      "scope": {
+        "allow": [
+          { "path": "**" }
+        ]
+      }
+    },
+    "shell": {
+      "open": true
+    }
+  }
+}

@@ -1,0 +1,42 @@
+name: Build Viewer
+
+on:
+  push:
+    tags:
+      - 'viewer-v*'
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: viewer-app/src-tauri
+
+      - name: Build release binary
+        working-directory: viewer-app
+        run: cargo build --release --manifest-path src-tauri/Cargo.toml
+
+      - name: Rename binary
+        working-directory: viewer-app
+        run: |
+          Copy-Item src-tauri/target/release/sl-ot-viewer.exe sl-ot-viewer.exe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sl-ot-viewer-windows
+          path: viewer-app/sl-ot-viewer.exe
+
+      - name: Upload to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: viewer-app/sl-ot-viewer.exe
