@@ -150,6 +150,29 @@
     padding: 5px 10px !important;
     font-size: 12px !important;
   }
+  .fit-group {
+    display: inline-flex; align-items: stretch; gap: 0;
+    border-radius: var(--radius); overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  .fit-group .fit-btn {
+    border: none !important; border-radius: 0 !important;
+    padding: 5px 10px !important;
+  }
+  .auto-fit-toggle {
+    display: flex; align-items: center; justify-content: center;
+    width: 26px; cursor: pointer;
+    background: var(--bg-surface); border-left: 1px solid var(--border);
+    transition: background .12s;
+  }
+  .auto-fit-toggle:hover { background: #1e2345; }
+  .auto-fit-toggle input { display: none; }
+  .auto-fit-check {
+    font-size: 11px; color: var(--text-muted); transition: color .12s;
+  }
+  .auto-fit-toggle input:checked ~ .auto-fit-check {
+    color: var(--green);
+  }
   .toolbar .zoom-label {
     color: var(--text-muted); font-size: 11px;
     font-family: var(--mono); min-width: 36px; text-align: center;
@@ -443,7 +466,9 @@
       <button onclick="zoomOut()">&minus;</button>
     </div>
     <span class="zoom-label" id="zoom-label">100%</span>
-    <button class="btn-solo" onclick="resetView()">Fit</button>
+    <span class="fit-group">
+      <button class="btn-solo fit-btn" onclick="resetView()">Fit</button><label class="auto-fit-toggle" title="Auto-fit after filter or drag"><input type="checkbox" id="auto-fit-cb" checked onchange="window._toggleAutoFit(this.checked)"><span class="auto-fit-check">&#10003;</span></label>
+    </span>
     <button class="btn-solo" onclick="reLayout()">Re-layout</button>
     <div class="sep"></div>
     <div class="size-control">
@@ -1357,6 +1382,7 @@ function applyFilter() {
   const ver = window.__EMBEDDED_VERSION__ ? ' &middot; v' + window.__EMBEDDED_VERSION__ : '';
   document.getElementById('subtitle').innerHTML =
     vis.size + ' people &middot; org intelligence map' + ver;
+  doAutoFit();
 }
 
 let rt;
@@ -1498,6 +1524,13 @@ window.zoomIn = function() {
 window.zoomOut = function() {
   cy.zoom({ level: cy.zoom() / 1.25, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } });
 };
+let autoFit = true;
+window._toggleAutoFit = function(on) { autoFit = on; };
+
+function doAutoFit() {
+  if (autoFit) cy.fit(cy.elements(':visible'), 40);
+}
+
 window.resetView = function() {
   cy.fit(cy.elements(':visible'), 40);
 };
@@ -1849,6 +1882,10 @@ cy.on('tap', 'node[nodeType="program"]', function(e) {
 // Click on background closes detail panel
 cy.on('tap', function(e) {
   if (e.target === cy) closeDetail();
+});
+
+cy.on('dragfree', 'node', function() {
+  doAutoFit();
 });
 
 applyFilter();
