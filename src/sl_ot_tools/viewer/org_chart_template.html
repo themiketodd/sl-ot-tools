@@ -330,6 +330,83 @@
   .detail-contact-chip:hover {
     border-color: var(--accent); color: var(--accent-hover);
   }
+  .doc-badge {
+    display: inline-block; padding: 1px 6px;
+    background: rgba(76,141,255,0.12); border: 1px solid rgba(76,141,255,0.25);
+    border-radius: 8px; font-size: 9px; color: var(--accent);
+    margin-left: 6px; font-family: var(--mono); font-weight: 500;
+    vertical-align: middle;
+  }
+  .ws-clickable { cursor: pointer; }
+  .ws-clickable:hover .doc-badge {
+    background: rgba(76,141,255,0.2); border-color: var(--accent);
+  }
+  .doc-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 0; font-size: 12px; color: var(--text-primary);
+    border-bottom: 1px solid var(--border);
+  }
+  .doc-item:last-child { border-bottom: none; }
+  .doc-icon {
+    font-size: 10px; font-family: var(--mono); font-weight: 600;
+    color: var(--text-muted); min-width: 32px; text-align: center;
+    text-transform: uppercase;
+  }
+  .doc-meta {
+    font-size: 10px; color: var(--text-muted); margin-left: auto;
+    white-space: nowrap;
+  }
+  .knowledge-section {
+    margin-top: 14px; border-top: 1px solid var(--border); padding-top: 12px;
+  }
+  .knowledge-scroll {
+    max-height: 300px; overflow-y: auto;
+    border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--bg-deep); padding: 0;
+  }
+  .knowledge-scroll::-webkit-scrollbar { width: 4px; }
+  .knowledge-scroll::-webkit-scrollbar-track { background: transparent; }
+  .knowledge-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
+  .k-entry {
+    padding: 10px 12px; border-bottom: 1px solid var(--border);
+    transition: background .1s;
+  }
+  .k-entry:last-child { border-bottom: none; }
+  .k-entry:hover { background: rgba(255,255,255,0.02); }
+  .k-type {
+    display: inline-block; padding: 1px 6px;
+    border-radius: 3px; font-size: 9px; font-weight: 600;
+    font-family: var(--mono); letter-spacing: 0.5px;
+    text-transform: uppercase; margin-right: 6px;
+    vertical-align: middle;
+  }
+  .k-type-decision { background: rgba(76,141,255,0.15); color: var(--accent); }
+  .k-type-technical { background: rgba(92,224,160,0.12); color: var(--green); }
+  .k-type-status { background: rgba(245,166,35,0.12); color: var(--orange); }
+  .k-type-action { background: rgba(255,107,122,0.12); color: var(--red); }
+  .k-type-blocker { background: rgba(255,107,122,0.2); color: var(--red); }
+  .k-type-timeline, .k-type-budget, .k-type-risk {
+    background: rgba(245,166,35,0.12); color: var(--orange);
+  }
+  .k-summary {
+    font-size: 12px; color: var(--text-primary); line-height: 1.4;
+    display: inline; vertical-align: middle;
+  }
+  .k-detail {
+    font-size: 11px; color: var(--text-secondary); line-height: 1.45;
+    margin-top: 4px;
+  }
+  .k-meta {
+    font-size: 10px; color: var(--text-muted); margin-top: 3px;
+    font-family: var(--mono);
+  }
+  .k-count-badge {
+    display: inline-block; padding: 1px 6px;
+    background: rgba(92,224,160,0.12); border: 1px solid rgba(92,224,160,0.25);
+    border-radius: 8px; font-size: 9px; color: var(--green);
+    margin-left: 6px; font-family: var(--mono); font-weight: 500;
+    vertical-align: middle;
+  }
   .hint kbd {
     display: inline-block; padding: 1px 4px;
     background: var(--bg-surface); border: 1px solid var(--border);
@@ -417,6 +494,8 @@ document.addEventListener('DOMContentLoaded', async function() {
 // Use embedded data if available, otherwise fetch from files
 let orgData = window.__EMBEDDED_ORG_DATA__ || null;
 let engagementMap = window.__EMBEDDED_ENGAGEMENT_MAP__ || null;
+let fileIndex = window.__EMBEDDED_FILE_INDEX__ || null;
+let knowledgeEntries = window.__EMBEDDED_KNOWLEDGE__ || null;
 
 if (!orgData) {
   try {
@@ -729,6 +808,34 @@ const ALL_WS_KEYS = new Set();
 ENGAGEMENT_DATA.forEach(e => e.workstreams.forEach(ws => ALL_WS_KEYS.add(e.key + '/' + ws.key)));
 let activeWorkstreams = new Set(ALL_WS_KEYS);
 const useEngagements = ENGAGEMENT_DATA.length > 0;
+
+// File index: build document count per workstream
+const DOC_COUNTS = {};  // "eng/ws" -> count
+const DOC_BY_WS = {};   // "eng/ws" -> [file entries]
+if (fileIndex && fileIndex.files) {
+  for (const f of fileIndex.files) {
+    if (!f.is_primary) continue;
+    const key = (f.engagement || '') + '/' + (f.workstream || 'unclassified');
+    DOC_COUNTS[key] = (DOC_COUNTS[key] || 0) + 1;
+    if (!DOC_BY_WS[key]) DOC_BY_WS[key] = [];
+    DOC_BY_WS[key].push(f);
+  }
+}
+
+// Knowledge: build indexes by program and by workstream
+const KNOWLEDGE_BY_PROG = {};   // program_key -> [entries]
+const KNOWLEDGE_BY_WS = {};     // "eng/ws" -> [entries]
+if (knowledgeEntries && Array.isArray(knowledgeEntries)) {
+  for (const k of knowledgeEntries) {
+    const wsKey = (k.engagement || '') + '/' + (k.workstream || '');
+    if (!KNOWLEDGE_BY_WS[wsKey]) KNOWLEDGE_BY_WS[wsKey] = [];
+    KNOWLEDGE_BY_WS[wsKey].push(k);
+    for (const prog of (k.programs || [])) {
+      if (!KNOWLEDGE_BY_PROG[prog]) KNOWLEDGE_BY_PROG[prog] = [];
+      KNOWLEDGE_BY_PROG[prog].push(k);
+    }
+  }
+}
 
 function syncProgs() {
   activePrograms.clear();
@@ -1315,10 +1422,14 @@ function buildSidebar() {
       h += '</div>';
       for (const ws of eng.workstreams) {
         const wsFullKey = eng.key + '/' + ws.key;
-        h += '<div class="filter-item child" style="display:flex;align-items:center">';
+        const docCount = DOC_COUNTS[wsFullKey] || 0;
+        const wsClass = docCount > 0 ? 'filter-item child ws-clickable' : 'filter-item child';
+        h += '<div class="' + wsClass + '" style="display:flex;align-items:center">';
         h += '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;flex:1">';
         h += '<input type="checkbox" id="ws-' + wsFullKey + '" checked onchange="window._onWorkstream(\'' + eng.key + '\')">';
-        h += ws.label + '</label>';
+        h += ws.label;
+        if (docCount > 0) h += '<span class="doc-badge" onclick="event.preventDefault();event.stopPropagation();window._showWsDocs(\'' + wsFullKey + '\')" title="' + docCount + ' documents">' + docCount + ' docs</span>';
+        h += '</label>';
         h += spLink(ws.sharepoint_url);
         h += '</div>';
       }
@@ -1555,9 +1666,84 @@ function showProgramDetail(nodeData) {
     }
   }
 
+  // Knowledge log entries for this program
+  const progKnowledge = KNOWLEDGE_BY_PROG[progKey] || [];
+  h += renderKnowledgeSection(progKnowledge, 'Knowledge Log');
+
   detailBody.innerHTML = h;
   detailPanel.classList.add('open');
 }
+
+// Render knowledge entries as scrollable HTML
+function renderKnowledgeSection(entries, label) {
+  if (!entries || !entries.length) return '';
+  let h = '<div class="knowledge-section">';
+  h += '<div class="detail-section"><h4>' + escHtml(label) + ' <span class="k-count-badge">' + entries.length + '</span></h4></div>';
+  h += '<div class="knowledge-scroll">';
+  // Sort by date desc
+  const sorted = entries.slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  for (const k of sorted) {
+    const typeLower = (k.type || 'status').toLowerCase();
+    h += '<div class="k-entry">';
+    h += '<span class="k-type k-type-' + typeLower + '">' + escHtml(k.type || 'STATUS') + '</span>';
+    h += '<span class="k-summary">' + escHtml(k.summary || '') + '</span>';
+    if (k.detail) h += '<div class="k-detail">' + escHtml(k.detail) + '</div>';
+    const meta = [];
+    if (k.date) meta.push(k.date);
+    if (k.source) meta.push(k.source.replace(/"/g, ''));
+    if (meta.length) h += '<div class="k-meta">' + escHtml(meta.join(' · ')) + '</div>';
+    h += '</div>';
+  }
+  h += '</div></div>';
+  return h;
+}
+
+// Show workstream documents in the detail panel
+window._showWsDocs = function(wsKey) {
+  const docs = DOC_BY_WS[wsKey] || [];
+  if (!docs.length) return;
+
+  const parts = wsKey.split('/');
+  const engKey = parts[0];
+  const wsName = parts.slice(1).join('/');
+
+  // Find the workstream label from engagement data
+  let wsLabel = wsName;
+  for (const eng of ENGAGEMENT_DATA) {
+    if (eng.key === engKey) {
+      for (const ws of eng.workstreams) {
+        if (ws.key === wsName) { wsLabel = ws.label; break; }
+      }
+      break;
+    }
+  }
+
+  detailHeaderLabel.textContent = 'Documents';
+  let h = '';
+  h += '<div class="detail-prog-header" style="color:var(--accent)">' + escHtml(wsLabel) + '</div>';
+  h += '<div class="detail-title" style="margin-bottom:14px">' + docs.length + ' document' + (docs.length !== 1 ? 's' : '') + '</div>';
+
+  const typeIcons = { pptx: 'PPTX', xlsx: 'XLSX', docx: 'DOCX', pdf: 'PDF' };
+
+  for (const doc of docs) {
+    h += '<div class="doc-item">';
+    h += '<span class="doc-icon">' + (typeIcons[doc.file_type] || doc.file_type) + '</span>';
+    h += '<div style="flex:1;min-width:0">';
+    h += '<div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="' + escHtml(doc.relative_path) + '">' + escHtml(doc.filename) + '</div>';
+    h += '</div>';
+    const size = doc.size > 1048576 ? (doc.size / 1048576).toFixed(1) + ' MB' : Math.round(doc.size / 1024) + ' KB';
+    const date = doc.modified ? doc.modified.slice(0, 10) : '';
+    h += '<span class="doc-meta">' + size + (date ? ' &middot; ' + date : '') + '</span>';
+    h += '</div>';
+  }
+
+  // Knowledge log entries for this workstream
+  const wsKnowledge = KNOWLEDGE_BY_WS[wsKey] || [];
+  h += renderKnowledgeSection(wsKnowledge, 'Knowledge Log');
+
+  detailBody.innerHTML = h;
+  detailPanel.classList.add('open');
+};
 
 // Focus a node by ID (used by contact chips in program detail)
 window._focusNode = function(nodeId) {

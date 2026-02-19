@@ -10,6 +10,8 @@ Commands:
     settings                 Configure user-level settings (~/.config/sl-ot-tools/)
     check                    Verify installation and config
     generate-viewer          Regenerate org chart viewer from template
+    index-files              Scan and index engagement documents + email attachments
+    extract-text [--force]   Extract text from indexed documents into markdown summaries
 """
 
 import json
@@ -491,12 +493,28 @@ def _generate_viewer(company_dir):
 
     engagement_map_json = json.dumps(engagement_map, ensure_ascii=False) if engagement_map else "null"
 
+    # Parse knowledge logs for embedding
+    knowledge_entries = _parse_knowledge_logs(company_dir)
+    knowledge_json = json.dumps(knowledge_entries, ensure_ascii=False) if knowledge_entries else "null"
+
+    # Read file index data for embedding
+    file_index_path = company_dir / "file_index.json"
+    file_index_json = "null"
+    if file_index_path.exists():
+        try:
+            fi_data = load_json(file_index_path)
+            file_index_json = json.dumps(fi_data, ensure_ascii=False)
+        except Exception as e:
+            print(f"  WARNING: Could not read file_index.json for embedding: {e}")
+
     # Build embedded data script block
     embed_script = (
         '<script>\n'
         f'window.__EMBEDDED_VERSION__ = "{__version__}";\n'
         f'window.__EMBEDDED_ORG_DATA__ = {org_chart_json};\n'
         f'window.__EMBEDDED_ENGAGEMENT_MAP__ = {engagement_map_json};\n'
+        f'window.__EMBEDDED_FILE_INDEX__ = {file_index_json};\n'
+        f'window.__EMBEDDED_KNOWLEDGE__ = {knowledge_json};\n'
         '</script>\n'
     )
 
@@ -507,6 +525,115 @@ def _generate_viewer(company_dir):
     output_path = company_dir / "org_chart_viewer.html"
     output_path.write_text(html, encoding="utf-8")
     print(f"Generated viewer: {output_path}")
+
+
+def _parse_knowledge_logs(company_dir):
+    """Parse all KNOWLEDGE_LOG.md files into structured entries for the viewer.
+
+    Walks engagement workstream dirs looking for KNOWLEDGE_LOG.md files,
+    parses each nugget into a dict with type, summary, programs, detail,
+    source, date, engagement, and workstream.
+
+    Returns:
+        List of knowledge entry dicts, or empty list if none found.
+    """
+    import re
+
+    repo_root = company_dir.parent
+    entries = []
+
+    for eng_dir in sorted(repo_root.iterdir()):
+        if not eng_dir.is_dir():
+            continue
+        cfg_path = eng_dir / "engagement_config.json"
+        if not cfg_path.exists():
+            continue
+
+        try:
+            cfg = load_json(cfg_path)
+        except Exception:
+            continue
+
+        eng_key = cfg.get("engagement", eng_dir.name)
+
+        # Walk all subdirs for KNOWLEDGE_LOG.md
+        for log_path in eng_dir.rglob("KNOWLEDGE_LOG.md"):
+            # Determine workstream from path
+            rel = log_path.parent.relative_to(eng_dir)
+            ws_dir = str(rel.parts[0]) if rel.parts else ""
+
+            # Reverse-lookup workstream key from output_dir
+            ws_key = None
+            for wk, wd in cfg.get("workstreams", {}).items():
+                if isinstance(wd, dict) and wd.get("output_dir") == ws_dir:
+                    ws_key = wk
+                    break
+            if not ws_key:
+                ws_key = ws_dir
+
+            try:
+                text = log_path.read_text(encoding="utf-8")
+            except Exception:
+                continue
+
+            current_date = ""
+            current_entry = None
+
+            for line in text.split("\n"):
+                # Date header: ## 2026-02-15
+                date_match = re.match(r"^##\s+(\d{4}-\d{2}-\d{2})\s*$", line)
+                if date_match:
+                    if current_entry:
+                        entries.append(current_entry)
+                        current_entry = None
+                    current_date = date_match.group(1)
+                    continue
+
+                # Nugget header: ### [TYPE] Summary
+                nugget_match = re.match(r"^###\s+\[(\w+)\]\s+(.+)$", line)
+                if nugget_match:
+                    if current_entry:
+                        entries.append(current_entry)
+                    current_entry = {
+                        "type": nugget_match.group(1),
+                        "summary": nugget_match.group(2).strip(),
+                        "programs": [],
+                        "detail": "",
+                        "source": "",
+                        "date": current_date,
+                        "engagement": eng_key,
+                        "workstream": ws_key,
+                    }
+                    continue
+
+                if not current_entry:
+                    continue
+
+                # Parse metadata lines
+                prog_match = re.match(r"^-\s+\*\*Programs?\*\*:\s*(.+)$", line)
+                if prog_match:
+                    progs = [p.strip() for p in prog_match.group(1).split(",") if p.strip()]
+                    current_entry["programs"] = progs
+                    continue
+
+                detail_match = re.match(r"^-\s+\*\*Detail\*\*:\s*(.+)$", line)
+                if detail_match:
+                    current_entry["detail"] = detail_match.group(1).strip()
+                    continue
+
+                source_match = re.match(r"^-\s+\*\*Source\*\*:\s*(.+)$", line)
+                if source_match:
+                    current_entry["source"] = source_match.group(1).strip()
+                    continue
+
+            # Don't forget the last entry
+            if current_entry:
+                entries.append(current_entry)
+
+    if entries:
+        print(f"Parsed knowledge logs: {len(entries)} entries from {len(set(e['engagement'] + '/' + e['workstream'] for e in entries))} workstream(s)")
+
+    return entries
 
 
 def _generate_engagement_map(company_dir):
@@ -651,6 +778,65 @@ def _install_skills(repo_root, engagements, force=False):
         print(f"Installed {installed} skills to .claude/commands/")
 
 
+# ── index-files ──────────────────────────────────────────────
+
+def cmd_index_files():
+    """Scan and index engagement documents and email attachments."""
+    repo_root = find_repo_root()
+    if not repo_root:
+        print("ERROR: Not inside a company repo (_company/ not found)")
+        sys.exit(1)
+
+    company_dir = repo_root / "_company"
+
+    from .documents.indexer import build_file_index, save_file_index
+
+    print("Scanning engagement directories and email attachments...")
+    index = build_file_index(repo_root)
+
+    path = save_file_index(company_dir, index)
+    print(f"File index: {path}")
+    print(f"  Total files: {index['total_files']}")
+    print(f"  Primary: {index['primary_files']}")
+    print(f"  Duplicates: {index['duplicates']}")
+
+    # Breakdown by engagement
+    by_eng = {}
+    for entry in index["files"]:
+        eng = entry.get("engagement") or "(unclassified)"
+        by_eng.setdefault(eng, 0)
+        if entry.get("is_primary", True):
+            by_eng[eng] += 1
+    for eng, count in sorted(by_eng.items()):
+        print(f"    {eng}: {count} primary files")
+
+
+# ── extract-text ─────────────────────────────────────────────
+
+def cmd_extract_text(force=False):
+    """Extract text from indexed documents into markdown summaries."""
+    repo_root = find_repo_root()
+    if not repo_root:
+        print("ERROR: Not inside a company repo (_company/ not found)")
+        sys.exit(1)
+
+    from .documents.summarizer import summarize_files
+
+    print("Extracting text from indexed documents...")
+    result = summarize_files(repo_root, force=force)
+
+    if "error" in result:
+        print(f"ERROR: {result['error']}")
+        sys.exit(1)
+
+    print(f"  Extracted: {result['extracted']}")
+    print(f"  Skipped (unchanged/unapproved): {result['skipped']}")
+    if result["errors"]:
+        print(f"  Errors: {len(result['errors'])}")
+        for err in result["errors"]:
+            print(f"    {err}")
+
+
 # ── helpers ───────────────────────────────────────────────────
 
 def _write_json(path, data):
@@ -677,6 +863,8 @@ def main():
         print("  settings                 Configure user-level settings")
         print("  check                    Verify installation and config")
         print("  generate-viewer          Regenerate org chart viewer")
+        print("  index-files              Scan and index documents")
+        print("  extract-text [--force]   Extract text from indexed documents")
         print()
         print("  --version                Show version")
         sys.exit(0)
@@ -713,6 +901,13 @@ def main():
 
     elif args[0] == "generate-viewer":
         cmd_generate_viewer()
+
+    elif args[0] == "index-files":
+        cmd_index_files()
+
+    elif args[0] == "extract-text":
+        force = "--force" in args
+        cmd_extract_text(force=force)
 
     else:
         print(f"Unknown command: {args[0]}")

@@ -18,11 +18,58 @@ The knowledge extractor is Claude-driven (not a Python script). Classification a
 6. Read `.local/knowledge_checkpoint.json` if it exists (skip if reprocessing)
 7. Read the org chart at `{{COMPANY_DIR}}/org_chart.json` to resolve program membership
 
+## Status email auto-detection
+
+Before the main extraction loop, auto-detect recurring email patterns that indicate status updates:
+
+1. Group all loaded emails by sender domain + normalized subject pattern:
+   - Strip dates, numbers, "RE:", "FW:" prefixes from subjects
+   - Group emails with the same sender address AND >80% similar normalized subject
+2. Flag groups with **3+ occurrences** as "recurring status pattern"
+3. If any recurring patterns are detected, present them to the user:
+
+```
+Detected recurring status emails:
+1. Deloitte (sarah.jones@deloitte.com) — "Weekly Status Update - Enclave" (8 emails)
+   → Suggested workstream: enclave/background
+   → Suggested type: STATUS
+2. NCC Group (reports@ncc.com) — "Cyber Assessment Progress" (4 emails)
+   → Suggested workstream: cyber/general
+   → Suggested type: STATUS
+```
+
+4. For each pattern, ask the user to **Confirm** (accept routing), **Adjust** (change workstream), or **Ignore** (treat as normal emails)
+5. Confirmed patterns: all matching emails get classified as STATUS type and routed to the confirmed workstream — they skip the normal classification step
+6. Remaining (non-pattern) emails proceed through normal classification below
+
 ## Filtering
 
 - Skip emails whose subject+date key is already in the checkpoint (unless reprocessing)
 - Skip emails whose sender matches any pattern in skip_senders (merged from platform defaults + company + engagement configs)
 - After filtering, report how many emails remain to process (and how many were skipped)
+
+## Attachment triage
+
+For emails within the last **7 days** that have attachments (office files: .docx, .pptx, .xlsx, .pdf):
+
+1. After filtering but before classification, scan remaining emails for attachments
+2. For each email with office-file attachments, show the attachment list:
+   ```
+   Email: "Q4 Status Update" from sarah.jones@deloitte.com
+   Attachments:
+     - [pptx] Enclave Status Deck.pptx (245 KB)
+     - [xlsx] Budget Tracker.xlsx (89 KB)
+   Process these for document knowledge? [Yes / Skip]
+   ```
+3. If **Yes**: add each attachment to `{{COMPANY_DIR}}/file_index.json` with:
+   - `source: "email_attachment"`
+   - `email_id`, `email_subject`, `original_name` from the email
+   - `is_primary: true` (unless a duplicate hash already exists)
+   Also add the relative path to `{{COMPANY_DIR}}/doc_triage.json` approved list
+4. If **Skip**: move on, don't add to file index
+5. Accepted attachments will be extracted and knowledge-processed in the next `/extract-doc-knowledge` run
+
+This keeps the two pipelines connected — email review surfaces attachments, document pipeline processes them.
 
 ## Classification
 
