@@ -382,6 +382,19 @@ function transformOrgChart(data) {
     'Contractor': 'contractor', 'Unknown': 'unknown'
   };
 
+  function truncLine(str, max) {
+    if (!str) return '';
+    str = str.trim();
+    return str.length > max ? str.slice(0, max - 1) + '\u2026' : str;
+  }
+
+  function buildLabel(name, title, comment) {
+    const lines = [truncLine(name, 22)];
+    if (title) lines.push(truncLine(title, 26));
+    if (comment) lines.push(truncLine(comment, 26));
+    return lines.join('\n');
+  }
+
   function makeId(name) {
     return name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/(^_|_$)/g, '');
   }
@@ -412,8 +425,9 @@ function transformOrgChart(data) {
     for (const person of data[section]) {
       const id = makeId(person.name);
       const progs = person.programs || [];
+      const comment = person.confidence ? person.confidence : '';
       nodes[id] = {
-        label: `${person.name}\n${person.title || ''}`.trim(),
+        label: buildLabel(person.name, person.title, comment),
         org: companyDomain,
         progs: progs,
         email: person.email || '',
@@ -451,7 +465,7 @@ function transformOrgChart(data) {
         for (const person of orgData_.key_contacts) {
           const id = makeId(person.name);
           nodes[id] = {
-            label: `${person.name}\n${person.title || ''}`.trim(),
+            label: buildLabel(person.name, person.title, person.notes),
             org: orgId,
             progs: person.programs || [],
             email: person.email || '',
@@ -585,7 +599,7 @@ const CLASS_COLORS = {
 
 // ==================== NODE SIZE STATE ====================
 
-const BASE_W = 80, BASE_H = 28, BASE_FONT = 7;
+const BASE_W = 90, BASE_H = 36, BASE_FONT = 7;
 let nodeScale = 1.0;
 let textScale = 1.0;
 
