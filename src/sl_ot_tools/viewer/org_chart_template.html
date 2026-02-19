@@ -1022,15 +1022,39 @@ function buildStylesheet() {
 
 // ==================== LAYOUT ====================
 
-function buildLayoutOptions() {
+function buildLayoutOptions(useFallback) {
+  if (useFallback) {
+    return {
+      name: 'cose',
+      animate: false,
+      fit: true,
+      padding: 40,
+      nodeDimensionsIncludeLabels: true,
+      idealEdgeLength: 100,
+      nodeRepulsion: 8000,
+      edgeElasticity: 0.45,
+      nestingFactor: 0.1,
+      gravity: 0.25,
+      numIter: 1000
+    };
+  }
+
   const depths = computeDepths();
+
+  // Only add constraints for edges where both nodes exist
+  const allNodeIds = new Set(Object.keys(NODES));
+  PROGRAM_BOXES.forEach(p => allNodeIds.add(p.id));
 
   const relativePlacementConstraint = [];
   for (const [f, t] of REPORTING) {
-    relativePlacementConstraint.push({ top: f, bottom: t, gap: 80 });
+    if (allNodeIds.has(f) && allNodeIds.has(t)) {
+      relativePlacementConstraint.push({ top: f, bottom: t, gap: 80 });
+    }
   }
   for (const [f, t] of INTERNAL_DOTTED) {
-    relativePlacementConstraint.push({ top: f, bottom: t, gap: 80 });
+    if (allNodeIds.has(f) && allNodeIds.has(t)) {
+      relativePlacementConstraint.push({ top: f, bottom: t, gap: 80 });
+    }
   }
 
   const depthGroups = {};
@@ -1242,7 +1266,12 @@ window.resetView = function() {
   cy.fit(cy.elements(':visible'), 40);
 };
 window.reLayout = function() {
-  cy.layout(buildLayoutOptions()).run();
+  try {
+    cy.layout(buildLayoutOptions(false)).run();
+  } catch(e) {
+    console.warn('fcose layout failed, using fallback:', e.message);
+    cy.layout(buildLayoutOptions(true)).run();
+  }
   setTimeout(() => cy.fit(cy.elements(':visible'), 40), 100);
 };
 
@@ -1258,16 +1287,40 @@ window.addEventListener('keydown', function(e) {
 buildSidebar();
 
 const elements = buildElements();
-const cy = cytoscape({
-  container: document.getElementById('cy'),
-  elements: [...elements.nodes, ...elements.edges],
-  style: buildStylesheet(),
-  layout: buildLayoutOptions(),
-  minZoom: 0.1,
-  maxZoom: 5,
-  wheelSensitivity: 0.3,
-  boxSelectionEnabled: false
-});
+let layoutOpts;
+try {
+  // Test that fcose layout options build without error
+  layoutOpts = buildLayoutOptions(false);
+} catch(e) {
+  console.warn('fcose layout options failed, using fallback:', e.message);
+  layoutOpts = buildLayoutOptions(true);
+}
+
+let cy;
+try {
+  cy = cytoscape({
+    container: document.getElementById('cy'),
+    elements: [...elements.nodes, ...elements.edges],
+    style: buildStylesheet(),
+    layout: layoutOpts,
+    minZoom: 0.1,
+    maxZoom: 5,
+    wheelSensitivity: 0.3,
+    boxSelectionEnabled: false
+  });
+} catch(e) {
+  console.warn('Cytoscape init with fcose failed, retrying with cose fallback:', e.message);
+  cy = cytoscape({
+    container: document.getElementById('cy'),
+    elements: [...elements.nodes, ...elements.edges],
+    style: buildStylesheet(),
+    layout: buildLayoutOptions(true),
+    minZoom: 0.1,
+    maxZoom: 5,
+    wheelSensitivity: 0.3,
+    boxSelectionEnabled: false
+  });
+}
 
 cy.on('zoom', function() {
   document.getElementById('zoom-label').textContent = Math.round(cy.zoom() * 100) + '%';
