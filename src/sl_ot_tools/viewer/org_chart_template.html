@@ -269,7 +269,11 @@
   }
   .detail-header button:hover { color: var(--text-primary); }
   #detail-body {
-    flex: 1; overflow-y: auto; padding: 16px;
+    flex: 1; overflow: hidden; padding: 16px;
+    display: flex; flex-direction: column;
+  }
+  #detail-body.no-knowledge {
+    overflow-y: auto;
   }
   #detail-body::-webkit-scrollbar { width: 4px; }
   #detail-body::-webkit-scrollbar-track { background: transparent; }
@@ -358,9 +362,10 @@
   }
   .knowledge-section {
     margin-top: 14px; border-top: 1px solid var(--border); padding-top: 12px;
+    display: flex; flex-direction: column; flex: 1; min-height: 0;
   }
   .knowledge-scroll {
-    max-height: 300px; overflow-y: auto;
+    flex: 1; overflow-y: auto; min-height: 0;
     border: 1px solid var(--border); border-radius: var(--radius);
     background: var(--bg-deep); padding: 0;
   }
@@ -1599,6 +1604,7 @@ function showDetail(nodeData) {
   }
 
   detailBody.innerHTML = h;
+  detailBody.classList.add('no-knowledge');
   detailPanel.classList.add('open');
 }
 
@@ -1671,6 +1677,7 @@ function showProgramDetail(nodeData) {
   h += renderKnowledgeSection(progKnowledge, 'Knowledge Log');
 
   detailBody.innerHTML = h;
+  detailBody.classList.toggle('no-knowledge', !progKnowledge.length);
   detailPanel.classList.add('open');
 }
 
@@ -1742,6 +1749,7 @@ window._showWsDocs = function(wsKey) {
   h += renderKnowledgeSection(wsKnowledge, 'Knowledge Log');
 
   detailBody.innerHTML = h;
+  detailBody.classList.toggle('no-knowledge', !wsKnowledge.length);
   detailPanel.classList.add('open');
 };
 
