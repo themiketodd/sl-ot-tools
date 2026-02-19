@@ -502,14 +502,24 @@ function transformOrgChart(data) {
 
     // Build reverse map: program -> people (from key_altera_contacts)
     const progToPeople = {};
+    const progBoxSet = new Set(); // track added program box keys to avoid duplicates
 
+    // Pass 1: create all program boxes (no duplicates)
     for (const prog of progArray) {
       const progKey = prog.key || makeId(prog.name);
       const progId = progKey + '_p';
-      programBoxes.push({ key: progKey, id: progId, label: prog.name || progKey });
+      if (!progBoxSet.has(progKey)) {
+        progBoxSet.add(progKey);
+        programBoxes.push({ key: progKey, id: progId, label: prog.name || progKey });
+      }
+    }
+
+    // Pass 2: build tree structure and program links
+    for (const prog of progArray) {
+      const progKey = prog.key || makeId(prog.name);
+      const progId = progKey + '_p';
 
       const children = [];
-      // Handle sub_programs (array) or parent references (dict format)
       const subProgs = prog.sub_programs || [];
       if (Array.isArray(subProgs)) {
         for (const sub of subProgs) {
@@ -517,19 +527,7 @@ function transformOrgChart(data) {
           const subObj = typeof sub === 'string'
             ? progArray.find(p => p.key === sub) || { key: sub, name: sub }
             : sub;
-          const subId = subKey + '_p';
-          if (!programBoxes.find(p => p.key === subKey)) {
-            programBoxes.push({ key: subKey, id: subId, label: subObj.name || subKey });
-          }
           children.push({ key: subKey, label: subObj.name || subKey });
-
-          if (subObj.key_altera_contacts) {
-            for (const contact of subObj.key_altera_contacts) {
-              programLinks.push([subId, makeId(contact), subKey]);
-              if (!progToPeople[subKey]) progToPeople[subKey] = [];
-              progToPeople[subKey].push(makeId(contact));
-            }
-          }
         }
       }
 
@@ -538,7 +536,7 @@ function transformOrgChart(data) {
         programTree.push({ key: progKey, label: prog.name || progKey, children });
       }
 
-      // Top-level program contacts
+      // Program contacts -> links + reverse map
       if (prog.key_altera_contacts) {
         for (const contact of prog.key_altera_contacts) {
           programLinks.push([progId, makeId(contact), progKey]);
