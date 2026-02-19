@@ -819,8 +819,12 @@ function buildElements() {
     });
   }
 
+  // Collect all valid node IDs to skip dangling edges
+  const nodeIds = new Set(nodes.map(n => n.data.id));
+
   for (let i = 0; i < REPORTING.length; i++) {
     const [f, t] = REPORTING[i];
+    if (!nodeIds.has(f) || !nodeIds.has(t)) continue;
     const s = parseStyle(REPORT_STYLES[i] || 'stroke:#93c5fd,stroke-width:2px');
     edges.push({
       data: { id: 'report_' + i, source: f, target: t, edgeType: 'reporting', lineColor: s.color, lineWidth: s.width },
@@ -830,6 +834,7 @@ function buildElements() {
 
   for (let i = 0; i < INTERNAL_DOTTED.length; i++) {
     const [f, t] = INTERNAL_DOTTED[i];
+    if (!nodeIds.has(f) || !nodeIds.has(t)) continue;
     const s = parseStyle(DOTTED_STYLES[i] || 'stroke:#94a3b8,stroke-width:1px');
     edges.push({
       data: { id: 'dotted_' + i, source: f, target: t, edgeType: 'internal_dotted', lineColor: s.color, lineWidth: s.width },
@@ -840,6 +845,7 @@ function buildElements() {
   let sgEdgeIdx = 0;
   for (const [sgId, sg] of Object.entries(SUBGRAPHS)) {
     for (const [f, t] of (sg.edges || [])) {
+      if (!nodeIds.has(f) || !nodeIds.has(t)) continue;
       edges.push({
         data: { id: 'sg_' + sgEdgeIdx++, source: f, target: t, edgeType: 'subgraph_internal', lineColor: '#fca5a5', lineWidth: 1.5 },
         classes: 'subgraph-internal'
@@ -849,6 +855,7 @@ function buildElements() {
 
   for (let i = 0; i < AFFILIATIONS.length; i++) {
     const a = AFFILIATIONS[i];
+    if (!nodeIds.has(a.from) || !nodeIds.has(a.to)) continue;
     edges.push({
       data: { id: 'affil_' + i, source: a.from, target: a.to, edgeType: 'affiliation', lineColor: '#6b7280', lineWidth: 1, label: a.label, prog: a.prog },
       classes: 'affiliation'
@@ -857,6 +864,7 @@ function buildElements() {
 
   for (let i = 0; i < PROGRAM_LINKS.length; i++) {
     const [f, t, prog] = PROGRAM_LINKS[i];
+    if (!nodeIds.has(f) || !nodeIds.has(t)) continue;
     edges.push({
       data: { id: 'plink_' + i, source: f, target: t, edgeType: 'program_link', lineColor: '#68d391', lineWidth: 1.5, prog },
       classes: 'program-link'
