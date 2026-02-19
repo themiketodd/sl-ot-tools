@@ -235,6 +235,81 @@
   }
   .sp-link:hover { opacity: 1; color: var(--accent); }
   .sp-link svg { width: 12px; height: 12px; }
+
+  /* ── Detail Panel ── */
+  #detail-panel {
+    width: 320px; min-width: 200px; max-width: 50vw;
+    background: var(--bg-panel);
+    border-left: 1px solid var(--border);
+    display: none; flex-direction: column;
+    overflow: hidden; flex-shrink: 0;
+    position: relative;
+  }
+  #detail-panel.open { display: flex; }
+  #detail-panel .detail-resize {
+    position: absolute; left: -3px; top: 0; bottom: 0;
+    width: 6px; cursor: col-resize; z-index: 10;
+  }
+  #detail-panel .detail-resize:hover,
+  #detail-panel .detail-resize.dragging {
+    background: var(--accent-glow);
+  }
+  .detail-header {
+    padding: 14px 16px; font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 1.2px;
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center;
+    flex-shrink: 0;
+  }
+  .detail-header button {
+    background: none; border: none; color: var(--text-muted);
+    cursor: pointer; font-size: 15px; line-height: 1;
+    transition: color .15s;
+  }
+  .detail-header button:hover { color: var(--text-primary); }
+  #detail-body {
+    flex: 1; overflow-y: auto; padding: 16px;
+  }
+  #detail-body::-webkit-scrollbar { width: 4px; }
+  #detail-body::-webkit-scrollbar-track { background: transparent; }
+  #detail-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 4px; }
+  .detail-name {
+    font-size: 16px; font-weight: 600; color: #fff;
+    margin-bottom: 2px; line-height: 1.3;
+  }
+  .detail-title {
+    font-size: 12px; color: var(--text-secondary);
+    margin-bottom: 12px; line-height: 1.4;
+  }
+  .detail-section {
+    margin-bottom: 14px;
+  }
+  .detail-section h4 {
+    font-size: 9px; text-transform: uppercase; letter-spacing: 1.5px;
+    color: var(--text-muted); margin-bottom: 6px; font-weight: 500;
+  }
+  .detail-section .detail-val {
+    font-size: 12px; color: var(--text-primary); line-height: 1.5;
+  }
+  .detail-section a {
+    color: var(--accent); text-decoration: none;
+    transition: color .15s;
+  }
+  .detail-section a:hover { color: var(--accent-hover); text-decoration: underline; }
+  .detail-badge {
+    display: inline-block; padding: 2px 8px;
+    background: var(--bg-surface); border: 1px solid var(--border);
+    border-radius: 10px; font-size: 10px; color: var(--text-secondary);
+    margin: 2px 4px 2px 0;
+  }
+  .detail-badge.confidence-high { border-color: var(--green); color: var(--green); }
+  .detail-badge.confidence-medium { border-color: var(--orange); color: var(--orange); }
+  .detail-badge.confidence-low { border-color: var(--red); color: var(--red); }
+  .detail-signals {
+    font-size: 11.5px; color: var(--text-secondary); line-height: 1.55;
+    white-space: pre-wrap;
+  }
   .hint kbd {
     display: inline-block; padding: 1px 4px;
     background: var(--bg-surface); border: 1px solid var(--border);
@@ -296,6 +371,15 @@
   <div id="loading">Loading org chart data...</div>
   <div id="error-msg"></div>
   <div id="cy" style="display:none"></div>
+</div>
+
+<div id="detail-panel">
+  <div class="detail-resize" id="detail-resize"></div>
+  <div class="detail-header">
+    <span id="detail-header-label">Details</span>
+    <button onclick="closeDetail()" title="Close">&times;</button>
+  </div>
+  <div id="detail-body"></div>
 </div>
 
 <div class="hint">Scroll&thinsp;=&thinsp;zoom &middot; Drag&thinsp;=&thinsp;pan &middot; Drag nodes to rearrange &middot; <kbd>+</kbd><kbd>-</kbd><kbd>0</kbd></div>
@@ -431,7 +515,8 @@ function transformOrgChart(data) {
         org: companyDomain,
         progs: progs,
         email: person.email || '',
-        cls: inferCls(person.title, person.level)
+        cls: inferCls(person.title, person.level),
+        _person: person
       };
       if (person.reports_to) {
         const cleanReportsTo = person.reports_to.replace(/\s*\(.*?\)\s*$/, '');
@@ -469,7 +554,8 @@ function transformOrgChart(data) {
             org: orgId,
             progs: person.programs || [],
             email: person.email || '',
-            cls: orgKey === 'intel' ? 'intel' : 'exPerson'
+            cls: orgKey === 'intel' ? 'intel' : 'exPerson',
+            _person: person
           };
           members.push(id);
           if (person.affiliations) {
@@ -814,7 +900,7 @@ function buildElements() {
   }
 
   for (const [id, n] of Object.entries(NODES)) {
-    const data = { id, label: n.label, cls: n.cls, org: n.org, progs: n.progs, nodeType: 'person' };
+    const data = { id, label: n.label, cls: n.cls, org: n.org, progs: n.progs, nodeType: 'person', _person: n._person || {} };
     for (const [sgId, sg] of Object.entries(SUBGRAPHS)) {
       if (sg.members.includes(id)) {
         data.parent = 'group_' + sgId;
@@ -1296,6 +1382,121 @@ window.addEventListener('keydown', function(e) {
   else if (e.key === '0') resetView();
 });
 
+// ==================== DETAIL PANEL ====================
+
+const detailPanel = document.getElementById('detail-panel');
+const detailBody = document.getElementById('detail-body');
+const detailHeaderLabel = document.getElementById('detail-header-label');
+
+window.closeDetail = function() {
+  detailPanel.classList.remove('open');
+};
+
+function escHtml(str) {
+  if (!str) return '';
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function showDetail(nodeData) {
+  const p = nodeData._person || {};
+  const name = p.name || nodeData.label?.split('\n')[0] || nodeData.id;
+  const title = p.title || '';
+
+  detailHeaderLabel.textContent = 'Person';
+  let h = '';
+
+  // Name + title header
+  h += '<div class="detail-name">' + escHtml(name) + '</div>';
+  if (title) h += '<div class="detail-title">' + escHtml(title) + '</div>';
+
+  // Badges row: level, confidence
+  const badges = [];
+  if (p.level) badges.push(escHtml(p.level));
+  if (p.confidence) badges.push('<span class="detail-badge confidence-' + escHtml(p.confidence) + '">' + escHtml(p.confidence) + '</span>');
+  if (badges.length) h += '<div style="margin-bottom:12px">' + badges.map(b => '<span class="detail-badge">' + b + '</span>').join('') + '</div>';
+
+  // Contact info
+  const contactLines = [];
+  if (p.email) contactLines.push('<a href="mailto:' + escHtml(p.email) + '">' + escHtml(p.email) + '</a>');
+  if (p.phone) contactLines.push(escHtml(p.phone));
+  if (p.linkedin && p.linkedin !== 'N/A') contactLines.push('<a href="' + escHtml(p.linkedin) + '" target="_blank" rel="noopener">LinkedIn</a>');
+  if (p.location) contactLines.push(escHtml(p.location));
+  if (contactLines.length) {
+    h += '<div class="detail-section"><h4>Contact</h4><div class="detail-val">' + contactLines.join('<br>') + '</div></div>';
+  }
+
+  // Reporting
+  const reportLines = [];
+  if (p.reports_to) reportLines.push('Reports to: ' + escHtml(p.reports_to));
+  if (p.dotted_to) reportLines.push('Dotted to: ' + escHtml(p.dotted_to));
+  if (p.start_date) reportLines.push('Start date: ' + escHtml(p.start_date));
+  if (reportLines.length) {
+    h += '<div class="detail-section"><h4>Organization</h4><div class="detail-val">' + reportLines.join('<br>') + '</div></div>';
+  }
+
+  // Background
+  if (p.background) {
+    h += '<div class="detail-section"><h4>Background</h4><div class="detail-val">' + escHtml(p.background) + '</div></div>';
+  }
+
+  // Email signals
+  if (p.email_signals) {
+    h += '<div class="detail-section"><h4>Email Signals</h4><div class="detail-signals">' + escHtml(p.email_signals) + '</div></div>';
+  }
+
+  // Notes (externals)
+  if (p.notes) {
+    h += '<div class="detail-section"><h4>Notes</h4><div class="detail-val">' + escHtml(p.notes) + '</div></div>';
+  }
+
+  // Programs
+  if (nodeData.progs && nodeData.progs.length) {
+    h += '<div class="detail-section"><h4>Programs</h4><div>' + nodeData.progs.map(p => '<span class="detail-badge">' + escHtml(p) + '</span>').join('') + '</div></div>';
+  }
+
+  // Any remaining fields we haven't shown
+  const shownKeys = new Set(['name','title','email','phone','linkedin','location','level','confidence',
+    'reports_to','dotted_to','start_date','background','email_signals','notes','programs','progs',
+    'direct_reports','affiliations','cls','org','_person','label','id','nodeType','parent','progKey']);
+  const extra = Object.entries(p).filter(([k,v]) => !shownKeys.has(k) && v != null && v !== '' && v !== 'N/A');
+  for (const [k, v] of extra) {
+    const label = k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    const val = typeof v === 'object' ? JSON.stringify(v) : String(v);
+    if (val.length > 0 && val !== '[]' && val !== 'null') {
+      h += '<div class="detail-section"><h4>' + escHtml(label) + '</h4><div class="detail-val">' + escHtml(val) + '</div></div>';
+    }
+  }
+
+  detailBody.innerHTML = h;
+  detailPanel.classList.add('open');
+}
+
+// Resize handle
+(function() {
+  const handle = document.getElementById('detail-resize');
+  let dragging = false, startX, startW;
+  handle.addEventListener('mousedown', function(e) {
+    dragging = true; startX = e.clientX;
+    startW = detailPanel.offsetWidth;
+    handle.classList.add('dragging');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', function(e) {
+    if (!dragging) return;
+    const newW = Math.max(200, Math.min(window.innerWidth * 0.5, startW + (startX - e.clientX)));
+    detailPanel.style.width = newW + 'px';
+  });
+  document.addEventListener('mouseup', function() {
+    if (!dragging) return;
+    dragging = false;
+    handle.classList.remove('dragging');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  });
+})();
+
 // ==================== INIT ====================
 
 buildSidebar();
@@ -1344,6 +1545,15 @@ cy.on('dbltap', function(e) {
   if (e.target === cy) {
     cy.zoom({ level: cy.zoom() * 1.5, renderedPosition: e.renderedPosition });
   }
+});
+
+cy.on('tap', 'node[nodeType="person"]', function(e) {
+  showDetail(e.target.data());
+});
+
+// Click on background closes detail panel
+cy.on('tap', function(e) {
+  if (e.target === cy) closeDetail();
 });
 
 applyFilter();
