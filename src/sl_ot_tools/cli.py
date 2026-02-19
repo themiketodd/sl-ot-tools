@@ -10,6 +10,8 @@ Commands:
     settings                 Configure user-level settings (~/.config/sl-ot-tools/)
     check                    Verify installation and config
     generate-viewer          Regenerate org chart viewer from template
+    migrate-registry         Build engagement_registry.json from legacy data
+    validate-registry        Validate registry against org chart and configs
     index-files              Scan and index engagement documents + email attachments
     extract-text [--force]   Extract text from indexed documents into markdown summaries
 """
@@ -74,16 +76,23 @@ def cmd_init_company(slug):
     }
     _write_json(company_dir / "people_config.json", people_config)
 
-    # Empty org_chart.json
+    # Empty org_chart.json (no key_programs — use engagement_registry.json instead)
     org_chart = {
         "company": company_config["company"],
         "generated": "",
         "leadership": [],
         "people": [],
         "external_ecosystem": {},
-        "key_programs": [],
     }
     _write_json(company_dir / "org_chart.json", org_chart)
+
+    # Empty engagement_registry.json
+    from .registry import GOVERNANCE_TYPES, save_registry
+    registry = {
+        "governance_types": dict(GOVERNANCE_TYPES),
+        "engagements": {},
+    }
+    save_registry(company_dir, registry)
 
     # Empty checkpoints
     _write_json(company_dir / "people_checkpoint.json", {
@@ -200,7 +209,6 @@ def cmd_init_engagement(name):
                 "output_dir": "01-General",
                 "keywords_subject": [],
                 "keywords_body": [],
-                "programs": [],
                 "people_associations": [],
             }
         },
@@ -507,12 +515,18 @@ def _generate_viewer(company_dir):
         except Exception as e:
             print(f"  WARNING: Could not read file_index.json for embedding: {e}")
 
+    # Load engagement registry for embedding
+    from .registry import load_registry
+    registry_data = load_registry(company_dir)
+    registry_json = json.dumps(registry_data, ensure_ascii=False) if registry_data else "null"
+
     # Build embedded data script block
     embed_script = (
         '<script>\n'
         f'window.__EMBEDDED_VERSION__ = "{__version__}";\n'
         f'window.__EMBEDDED_ORG_DATA__ = {org_chart_json};\n'
         f'window.__EMBEDDED_ENGAGEMENT_MAP__ = {engagement_map_json};\n'
+        f'window.__EMBEDDED_REGISTRY__ = {registry_json};\n'
         f'window.__EMBEDDED_FILE_INDEX__ = {file_index_json};\n'
         f'window.__EMBEDDED_KNOWLEDGE__ = {knowledge_json};\n'
         '</script>\n'
@@ -597,7 +611,7 @@ def _parse_knowledge_logs(company_dir):
                     current_entry = {
                         "type": nugget_match.group(1),
                         "summary": nugget_match.group(2).strip(),
-                        "programs": [],
+                        "workstreams": [],
                         "detail": "",
                         "source": "",
                         "date": current_date,
@@ -609,11 +623,11 @@ def _parse_knowledge_logs(company_dir):
                 if not current_entry:
                     continue
 
-                # Parse metadata lines
-                prog_match = re.match(r"^-\s+\*\*Programs?\*\*:\s*(.+)$", line)
-                if prog_match:
-                    progs = [p.strip() for p in prog_match.group(1).split(",") if p.strip()]
-                    current_entry["programs"] = progs
+                # Parse metadata lines — accept both **Workstreams**: and **Programs**: (backward compat)
+                ws_match = re.match(r"^-\s+\*\*(?:Workstreams?|Programs?)\*\*:\s*(.+)$", line)
+                if ws_match:
+                    items = [p.strip() for p in ws_match.group(1).split(",") if p.strip()]
+                    current_entry["workstreams"] = items
                     continue
 
                 detail_match = re.match(r"^-\s+\*\*Detail\*\*:\s*(.+)$", line)
@@ -669,7 +683,6 @@ def _generate_engagement_map(company_dir):
             ws_entry = {
                 "key": ws_key,
                 "label": ws_data.get("label", ws_key),
-                "programs": ws_data.get("programs", []),
                 "people_associations": ws_data.get("people_associations", []),
             }
             ws_sp_url = ws_data.get("sharepoint_url", "")
@@ -778,6 +791,125 @@ def _install_skills(repo_root, engagements, force=False):
         print(f"Installed {installed} skills to .claude/commands/")
 
 
+# ── migrate-registry ─────────────────────────────────────────
+
+def cmd_migrate_registry():
+    """Build engagement_registry.json from legacy key_programs + engagement configs."""
+    repo_root = find_repo_root()
+    if not repo_root:
+        print("ERROR: Not inside a company repo (_company/ not found)")
+        sys.exit(1)
+
+    company_dir = repo_root / "_company"
+
+    from .registry import build_registry_from_legacy, save_registry
+
+    print("Building engagement registry from legacy data...")
+    registry = build_registry_from_legacy(repo_root)
+
+    eng_count = len(registry.get("engagements", {}))
+    ws_count = sum(
+        len(e.get("workstreams", {}))
+        for e in registry.get("engagements", {}).values()
+    )
+    print(f"  Found {eng_count} engagement(s) with {ws_count} workstream(s)")
+
+    path = save_registry(company_dir, registry)
+    print(f"  Written: {path}")
+
+    # Offer to strip legacy fields
+    print()
+    print("The registry is now the source of truth. Legacy fields can be removed:")
+    print("  - key_programs from _company/org_chart.json")
+    print("  - programs arrays from engagement_config.json workstreams")
+    print()
+    answer = input("Strip legacy fields? [y/N] ").strip().lower()
+    if answer in ("y", "yes"):
+        _strip_legacy_fields(repo_root)
+    else:
+        print("  Skipped — legacy fields preserved (you can remove them manually later)")
+
+    # Run validation
+    print()
+    cmd_validate_registry()
+
+
+def _strip_legacy_fields(repo_root):
+    """Remove key_programs from org_chart and programs from engagement configs."""
+    company_dir = repo_root / "_company"
+    org_chart_path = company_dir / "org_chart.json"
+
+    if org_chart_path.exists():
+        org_data = load_json(org_chart_path)
+        if "key_programs" in org_data:
+            del org_data["key_programs"]
+            _write_json(org_chart_path, org_data)
+            print(f"  Stripped key_programs from {org_chart_path.name}")
+
+    for eng_dir in sorted(repo_root.iterdir()):
+        if not eng_dir.is_dir():
+            continue
+        cfg_path = eng_dir / "engagement_config.json"
+        if not cfg_path.exists():
+            continue
+        try:
+            cfg = load_json(cfg_path)
+        except Exception:
+            continue
+        changed = False
+        for ws_key, ws_data in cfg.get("workstreams", {}).items():
+            if isinstance(ws_data, dict) and "programs" in ws_data:
+                del ws_data["programs"]
+                changed = True
+        if changed:
+            _write_json(cfg_path, cfg)
+            print(f"  Stripped programs from {eng_dir.name}/engagement_config.json")
+
+
+def cmd_validate_registry():
+    """Validate engagement registry against org chart and configs."""
+    repo_root = find_repo_root()
+    if not repo_root:
+        print("ERROR: Not inside a company repo (_company/ not found)")
+        sys.exit(1)
+
+    from .registry import validate_registry
+
+    result = validate_registry(repo_root)
+
+    if "error" in result:
+        print(f"ERROR: {result['error']}")
+        sys.exit(1)
+
+    print("=== Registry Validation ===")
+
+    if result["raci_mismatches"]:
+        print(f"\n  RACI mismatches ({len(result['raci_mismatches'])}):")
+        for m in result["raci_mismatches"]:
+            ws = f"/{m['workstream']}" if m["workstream"] else ""
+            print(f"    {m['engagement']}{ws} [{m['role']}]: {m['reason']}")
+
+    if result["orphan_engagements"]:
+        print(f"\n  Orphan engagements (in registry, no engagement dir):")
+        for e in result["orphan_engagements"]:
+            print(f"    {e}")
+
+    if result["orphan_workstreams"]:
+        print(f"\n  Orphan workstreams (in config, not in registry):")
+        for eng, ws in result["orphan_workstreams"]:
+            print(f"    {eng}/{ws}")
+
+    if result["valid"]:
+        print("\n  All checks passed.")
+    else:
+        issues = (
+            len(result["raci_mismatches"])
+            + len(result["orphan_engagements"])
+            + len(result["orphan_workstreams"])
+        )
+        print(f"\n  {issues} issue(s) found.")
+
+
 # ── index-files ──────────────────────────────────────────────
 
 def cmd_index_files():
@@ -863,6 +995,8 @@ def main():
         print("  settings                 Configure user-level settings")
         print("  check                    Verify installation and config")
         print("  generate-viewer          Regenerate org chart viewer")
+        print("  migrate-registry         Build registry from legacy data")
+        print("  validate-registry        Validate registry RACI + orphans")
         print("  index-files              Scan and index documents")
         print("  extract-text [--force]   Extract text from indexed documents")
         print()
@@ -901,6 +1035,12 @@ def main():
 
     elif args[0] == "generate-viewer":
         cmd_generate_viewer()
+
+    elif args[0] == "migrate-registry":
+        cmd_migrate_registry()
+
+    elif args[0] == "validate-registry":
+        cmd_validate_registry()
 
     elif args[0] == "index-files":
         cmd_index_files()

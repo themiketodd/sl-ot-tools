@@ -26,37 +26,39 @@ For each person in `leadership`, `people`, and `team` arrays:
 
 `makeId` logic: lowercase, replace non-alphanumeric runs with `_`, strip leading/trailing `_`
 
-### 7. Name consistency: key_altera_contacts references
-For each program in `key_programs` (whether array or dict format):
-- Check each name in `key_altera_contacts` resolves to a person node ID
+### 7. Registry RACI name validation
+If `{{COMPANY_DIR}}/engagement_registry.json` exists:
+- For each engagement and workstream, check each RACI name (R/A/C/I) resolves to a person node ID via `makeId()`
 - Collect mismatches
+If no registry but `key_programs` exists, fall back to checking `key_altera_contacts` names
 
 ### 8. Orphan detection
 - Count people with no `reports_to` or whose `reports_to` doesn't resolve to a person
 - These will appear as disconnected nodes (not necessarily wrong, but worth flagging)
 
-### 9. Program-to-engagement alignment
-- Read `{{COMPANY_DIR}}/engagement_map.json` if it exists
-- Check that every `programs` key referenced in workstreams exists as a key in `key_programs`
-- Flag any program keys in engagement configs that don't match
+### 9. Registry validation
+- Run `sl-ot-tools validate-registry` (or read `{{COMPANY_DIR}}/engagement_registry.json` directly)
+- Check RACI name resolution against org chart
+- Flag orphan engagements (in registry but no engagement dir) and orphan workstreams (in config but not registry)
 
 ## Report
 
 10. Present a summary:
-    - Total people, external orgs, programs, engagements
+    - Total people, external orgs, workstreams, engagements
     - Valid reporting edges vs dangling edges
     - Any name mismatches found (with suggested corrections)
     - Orphan nodes
-    - Program key mismatches
+    - RACI name mismatches and orphan workstreams
 
 ## Fix
 
 11. If there are name mismatches and the user passed "fix" or confirms when prompted:
-    - For each `reports_to` / `dotted_to` / `key_altera_contacts` mismatch, update the value in `{{COMPANY_DIR}}/org_chart.json` to match the person's actual name
+    - For each `reports_to` / `dotted_to` mismatch, update the value in `{{COMPANY_DIR}}/org_chart.json` to match the person's actual name
+    - For RACI name mismatches in `{{COMPANY_DIR}}/engagement_registry.json`, update names to match the person's actual name
     - Show the changes as a diff before writing
     - After fixing, re-run `sl-ot-tools generate-viewer` to regenerate with corrected data
 
-12. If there are program key mismatches, list them but do NOT auto-fix (these require manual review of engagement configs)
+12. If there are orphan workstreams or engagements, list them but do NOT auto-fix (these require manual review)
 
 13. Final confirmation: open the viewer path for the user
     - `{{COMPANY_DIR}}/org_chart_viewer.html`

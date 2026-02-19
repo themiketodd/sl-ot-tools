@@ -337,7 +337,7 @@
     font-size: 11.5px; color: var(--text-secondary); line-height: 1.55;
     white-space: pre-wrap;
   }
-  .detail-prog-header {
+  .detail-ws-header {
     font-size: 14px; font-weight: 600; color: var(--green);
     margin-bottom: 2px; line-height: 1.3;
   }
@@ -492,7 +492,7 @@
       <div class="legend-item"><span class="legend-swatch" style="background:#fefcbf;border:1px dashed #d69e2e"></span>TBD</div>
       <div class="legend-item"><span class="legend-swatch" style="background:#fbd38d"></span>Ext</div>
       <div class="legend-item"><span class="legend-swatch" style="background:#fc8181"></span>Intel</div>
-      <div class="legend-item"><span class="legend-swatch" style="background:#68d391"></span>Prog</div>
+      <div class="legend-item"><span class="legend-swatch" style="background:#68d391"></span>WS</div>
     </div>
   </div>
   <div id="loading">Loading org chart data...</div>
@@ -561,9 +561,9 @@ const INTERNAL_DOTTED = transformed.internalDotted;
 const DOTTED_STYLES = transformed.dottedStyles;
 const SUBGRAPHS = transformed.subgraphs;
 const AFFILIATIONS = transformed.affiliations;
-const PROGRAM_LINKS = transformed.programLinks;
-const PROGRAM_TREE = transformed.programTree;
-const PROGRAM_BOXES = transformed.programBoxes;
+const WS_LINKS = transformed.wsLinks;
+const WS_TREE = transformed.wsTree;
+const WS_BOXES = transformed.wsBoxes;
 const ORG_LIST = transformed.orgList;
 
 function transformOrgChart(data) {
@@ -581,9 +581,9 @@ function transformOrgChart(data) {
   const dottedStyles = [];
   const subgraphs = {};
   const affiliations = [];
-  const programLinks = [];
-  const programTree = [];
-  const programBoxes = [];
+  const wsLinks = [];
+  const wsTree = [];
+  const wsBoxes = [];
   const orgList = [];
 
   const clsMap = {
@@ -717,9 +717,82 @@ function transformOrgChart(data) {
     }
   }
 
-  // Process programs — supports both array format and dict format
-  if (data.key_programs) {
-    // Normalize to array of {key, name, ...}
+  // Process workstreams — registry-first, with legacy key_programs fallback
+  const registry = window.__EMBEDDED_REGISTRY__ || null;
+
+  if (registry && registry.engagements) {
+    // Registry path: build workstream nodes from engagement_registry.json
+    const wsToPeople = {};
+    const wsBoxSet = new Set();
+
+    for (const [engKey, eng] of Object.entries(registry.engagements)) {
+      const wsEntries = eng.workstreams || {};
+      const engContacts = (eng.raci || {}).responsible || [];
+
+      for (const [wsKey, ws] of Object.entries(wsEntries)) {
+        const fullKey = engKey + '/' + wsKey;
+        const wsId = fullKey.replace(/\//g, '_') + '_ws';
+        if (!wsBoxSet.has(fullKey)) {
+          wsBoxSet.add(fullKey);
+          wsBoxes.push({
+            key: fullKey, id: wsId,
+            label: ws.label || wsKey,
+            _ws: ws, _engKey: engKey, _wsKey: wsKey,
+            _engLabel: eng.label || engKey
+          });
+        }
+
+        // RACI contacts → links
+        const raciNames = [];
+        for (const role of ['responsible', 'accountable', 'consulted', 'informed']) {
+          for (const name of ((ws.raci || {})[role] || [])) {
+            raciNames.push(name);
+            const pid = makeId(name);
+            wsLinks.push([wsId, pid, fullKey]);
+            if (!wsToPeople[fullKey]) wsToPeople[fullKey] = [];
+            wsToPeople[fullKey].push(pid);
+          }
+        }
+      }
+
+      // Top-level engagement contacts (if no workstreams, treat engagement as a workstream)
+      if (Object.keys(wsEntries).length === 0 && engContacts.length > 0) {
+        const wsId = engKey + '_ws';
+        if (!wsBoxSet.has(engKey)) {
+          wsBoxSet.add(engKey);
+          wsBoxes.push({
+            key: engKey, id: wsId,
+            label: eng.label || engKey,
+            _ws: eng, _engKey: engKey, _wsKey: null,
+            _engLabel: eng.label || engKey
+          });
+        }
+        for (const name of engContacts) {
+          wsLinks.push([wsId, makeId(name), engKey]);
+          if (!wsToPeople[engKey]) wsToPeople[engKey] = [];
+          wsToPeople[engKey].push(makeId(name));
+        }
+      }
+    }
+
+    // Build tree for sidebar (engagements with workstream children)
+    for (const [engKey, eng] of Object.entries(registry.engagements)) {
+      const children = Object.entries(eng.workstreams || {}).map(([wsKey, ws]) => ({
+        key: engKey + '/' + wsKey, label: ws.label || wsKey
+      }));
+      wsTree.push({ key: engKey, label: eng.label || engKey, children });
+    }
+
+    // Reverse-map: assign workstream keys to people
+    for (const [wsKey, personIds] of Object.entries(wsToPeople)) {
+      for (const pid of personIds) {
+        if (nodes[pid] && !nodes[pid].progs.includes(wsKey)) {
+          nodes[pid].progs.push(wsKey);
+        }
+      }
+    }
+  } else if (data.key_programs) {
+    // Legacy fallback: build from key_programs
     let progArray;
     if (Array.isArray(data.key_programs)) {
       progArray = data.key_programs;
@@ -729,53 +802,41 @@ function transformOrgChart(data) {
       }));
     }
 
-    // Build reverse map: program -> people (from key_altera_contacts)
     const progToPeople = {};
-    const progBoxSet = new Set(); // track added program box keys to avoid duplicates
+    const progBoxSet = new Set();
 
-    // Pass 1: create all program boxes (no duplicates)
     for (const prog of progArray) {
       const progKey = prog.key || makeId(prog.name);
       const progId = progKey + '_p';
       if (!progBoxSet.has(progKey)) {
         progBoxSet.add(progKey);
-        programBoxes.push({ key: progKey, id: progId, label: prog.name || progKey, _prog: prog });
+        wsBoxes.push({ key: progKey, id: progId, label: prog.name || progKey, _ws: prog });
       }
     }
 
-    // Pass 2: build tree structure and program links
     for (const prog of progArray) {
       const progKey = prog.key || makeId(prog.name);
       const progId = progKey + '_p';
-
       const children = [];
-      const subProgs = prog.sub_programs || [];
-      if (Array.isArray(subProgs)) {
-        for (const sub of subProgs) {
-          const subKey = typeof sub === 'string' ? sub : (sub.key || makeId(sub.name));
-          const subObj = typeof sub === 'string'
-            ? progArray.find(p => p.key === sub) || { key: sub, name: sub }
-            : sub;
-          children.push({ key: subKey, label: subObj.name || subKey });
-        }
+      for (const sub of (prog.sub_programs || [])) {
+        const subKey = typeof sub === 'string' ? sub : (sub.key || makeId(sub.name));
+        const subObj = typeof sub === 'string'
+          ? progArray.find(p => p.key === sub) || { key: sub, name: sub }
+          : sub;
+        children.push({ key: subKey, label: subObj.name || subKey });
       }
-
-      // Skip programs that are sub-programs of another (they're children, not top-level)
       if (!prog.parent) {
-        programTree.push({ key: progKey, label: prog.name || progKey, children });
+        wsTree.push({ key: progKey, label: prog.name || progKey, children });
       }
-
-      // Program contacts -> links + reverse map
       if (prog.key_altera_contacts) {
         for (const contact of prog.key_altera_contacts) {
-          programLinks.push([progId, makeId(contact), progKey]);
+          wsLinks.push([progId, makeId(contact), progKey]);
           if (!progToPeople[progKey]) progToPeople[progKey] = [];
           progToPeople[progKey].push(makeId(contact));
         }
       }
     }
 
-    // Reverse-map: assign programs to people who don't already have them
     for (const [progKey, personIds] of Object.entries(progToPeople)) {
       for (const pid of personIds) {
         if (nodes[pid] && !nodes[pid].progs.includes(progKey)) {
@@ -787,16 +848,16 @@ function transformOrgChart(data) {
 
   return {
     nodes, reporting, reportStyles, internalDotted, dottedStyles,
-    subgraphs, affiliations, programLinks, programTree, programBoxes, orgList
+    subgraphs, affiliations, wsLinks, wsTree, wsBoxes, orgList
   };
 }
 
 // ==================== DERIVED SETS ====================
 
-const ALL_PROG_KEYS = new Set();
-PROGRAM_TREE.forEach(p => { ALL_PROG_KEYS.add(p.key); p.children.forEach(c => ALL_PROG_KEYS.add(c.key)); });
+const ALL_WS_FILTER_KEYS = new Set();
+WS_TREE.forEach(p => { ALL_WS_FILTER_KEYS.add(p.key); p.children.forEach(c => ALL_WS_FILTER_KEYS.add(c.key)); });
 
-const PROG_BOX_IDS = new Set(PROGRAM_BOXES.map(p => p.id));
+const WS_BOX_IDS = new Set(WS_BOXES.map(p => p.id));
 
 const CLASS_COLORS = {
   ceo:        { bg:'#1a365d', text:'#fff', border:'#2a4a7a' },
@@ -809,7 +870,7 @@ const CLASS_COLORS = {
   unknown:    { bg:'#fefcbf', text:'#744210', border:'#d69e2e' },
   exPerson:   { bg:'#fbd38d', text:'#744210', border:'#dd6b20' },
   intel:      { bg:'#fc8181', text:'#fff', border:'#e53e3e' },
-  program:    { bg:'#68d391', text:'#1a365d', border:'#38a169' }
+  workstream: { bg:'#68d391', text:'#1a365d', border:'#38a169' }
 };
 
 // ==================== NODE SIZE STATE ====================
@@ -830,7 +891,7 @@ function getNodeDims() {
 // ==================== FILTER STATE ====================
 
 let activeOrgs = new Set(ORG_LIST.map(o => o.key));
-let activePrograms = new Set(ALL_PROG_KEYS);
+let activeWsFilter = new Set(ALL_WS_FILTER_KEYS);
 
 // Engagement filter state (populated if engagementMap is available)
 const ENGAGEMENT_DATA = engagementMap ? engagementMap.engagements : [];
@@ -853,31 +914,31 @@ if (fileIndex && fileIndex.files) {
 }
 
 // Knowledge: build indexes by program and by workstream
-const KNOWLEDGE_BY_PROG = {};   // program_key -> [entries]
+const KNOWLEDGE_BY_WS_KEY = {};   // workstream_key -> [entries]
 const KNOWLEDGE_BY_WS = {};     // "eng/ws" -> [entries]
 if (knowledgeEntries && Array.isArray(knowledgeEntries)) {
   for (const k of knowledgeEntries) {
     const wsKey = (k.engagement || '') + '/' + (k.workstream || '');
     if (!KNOWLEDGE_BY_WS[wsKey]) KNOWLEDGE_BY_WS[wsKey] = [];
     KNOWLEDGE_BY_WS[wsKey].push(k);
-    for (const prog of (k.programs || [])) {
-      if (!KNOWLEDGE_BY_PROG[prog]) KNOWLEDGE_BY_PROG[prog] = [];
-      KNOWLEDGE_BY_PROG[prog].push(k);
+    for (const prog of (k.workstreams || k.programs || [])) {
+      if (!KNOWLEDGE_BY_WS_KEY[prog]) KNOWLEDGE_BY_WS_KEY[prog] = [];
+      KNOWLEDGE_BY_WS_KEY[prog].push(k);
     }
   }
 }
 
-function syncProgs() {
-  activePrograms.clear();
-  for (const parent of PROGRAM_TREE) {
+function syncWsFilter() {
+  activeWsFilter.clear();
+  for (const parent of WS_TREE) {
     if (parent.children.length === 0) {
-      if (document.getElementById('prog-' + parent.key).checked) activePrograms.add(parent.key);
+      if (document.getElementById('ws-' + parent.key).checked) activeWsFilter.add(parent.key);
     } else {
       let any = false;
       for (const child of parent.children) {
-        if (document.getElementById('prog-' + child.key).checked) { activePrograms.add(child.key); any = true; }
+        if (document.getElementById('ws-' + child.key).checked) { activeWsFilter.add(child.key); any = true; }
       }
-      if (any) activePrograms.add(parent.key);
+      if (any) activeWsFilter.add(parent.key);
     }
   }
 }
@@ -891,7 +952,7 @@ function syncOrgs() {
 
 function syncEngagements() {
   activeWorkstreams.clear();
-  activePrograms.clear();
+  activeWsFilter.clear();
   for (const eng of ENGAGEMENT_DATA) {
     let anyWs = false;
     for (const ws of eng.workstreams) {
@@ -900,7 +961,9 @@ function syncEngagements() {
       if (el && el.checked) {
         activeWorkstreams.add(wsFullKey);
         anyWs = true;
-        for (const p of ws.programs) activePrograms.add(p);
+        // Add ws key as filter (for registry-based filtering)
+        activeWsFilter.add(wsFullKey);
+        for (const p of (ws.programs || [])) activeWsFilter.add(p);
       }
     }
     // Update parent checkbox state
@@ -919,22 +982,22 @@ function syncEngagements() {
 window._onOrg = function() { syncOrgs(); scheduleRender(); };
 
 window._onParent = function(key) {
-  const parent = PROGRAM_TREE.find(p => p.key === key);
-  const checked = document.getElementById('prog-' + key).checked;
-  for (const c of parent.children) document.getElementById('prog-' + c.key).checked = checked;
-  syncProgs(); scheduleRender();
+  const parent = WS_TREE.find(p => p.key === key);
+  const checked = document.getElementById('ws-' + key).checked;
+  for (const c of parent.children) document.getElementById('ws-' + c.key).checked = checked;
+  syncWsFilter(); scheduleRender();
 };
 
 window._onChild = function(parentKey) {
-  const parent = PROGRAM_TREE.find(p => p.key === parentKey);
-  const all = parent.children.every(c => document.getElementById('prog-' + c.key).checked);
-  const any = parent.children.some(c => document.getElementById('prog-' + c.key).checked);
-  const pcb = document.getElementById('prog-' + parentKey);
+  const parent = WS_TREE.find(p => p.key === parentKey);
+  const all = parent.children.every(c => document.getElementById('ws-' + c.key).checked);
+  const any = parent.children.some(c => document.getElementById('ws-' + c.key).checked);
+  const pcb = document.getElementById('ws-' + parentKey);
   pcb.checked = all; pcb.indeterminate = !all && any;
-  syncProgs(); scheduleRender();
+  syncWsFilter(); scheduleRender();
 };
 
-window._onStandalone = function() { syncProgs(); scheduleRender(); };
+window._onStandalone = function() { syncWsFilter(); scheduleRender(); };
 
 window._onEngagement = function(engKey) {
   const eng = ENGAGEMENT_DATA.find(e => e.key === engKey);
@@ -970,7 +1033,7 @@ function getVisible() {
   const vis = new Set();
   const allProgsOn = useEngagements
     ? activeWorkstreams.size === ALL_WS_KEYS.size
-    : activePrograms.size === ALL_PROG_KEYS.size;
+    : activeWsFilter.size === ALL_WS_FILTER_KEYS.size;
 
   if (allProgsOn) {
     // All filters on — show everyone (original behavior)
@@ -999,7 +1062,7 @@ function getVisible() {
     const directMatch = new Set();
     for (const [id, n] of Object.entries(NODES)) {
       if (n.org !== internalOrgKey) continue;
-      if (n.progs.some(p => activePrograms.has(p))) { directMatch.add(id); continue; }
+      if (n.progs.some(p => activeWsFilter.has(p))) { directMatch.add(id); continue; }
       if (n.email && assocEmails.has(n.email.toLowerCase())) { directMatch.add(id); }
     }
 
@@ -1024,7 +1087,7 @@ function getVisible() {
   for (const [id, n] of Object.entries(NODES)) {
     if (n.org === internalOrgKey) continue;
     if (!activeOrgs.has(n.org)) continue;
-    if (n.progs.some(p => activePrograms.has(p))) vis.add(id);
+    if (n.progs.some(p => activeWsFilter.has(p))) vis.add(id);
   }
 
   return vis;
@@ -1049,10 +1112,10 @@ function buildElements() {
     });
   }
 
-  if (PROGRAM_BOXES.length > 0) {
+  if (WS_BOXES.length > 0) {
     nodes.push({
-      data: { id: 'group_PROGRAMS', label: 'Key Programs', nodeType: 'compound', org: 'programs' },
-      classes: 'compound compound-programs'
+      data: { id: 'group_WORKSTREAMS', label: 'Workstreams', nodeType: 'compound', org: 'workstreams' },
+      classes: 'compound compound-workstreams'
     });
   }
 
@@ -1067,10 +1130,10 @@ function buildElements() {
     nodes.push({ data, classes: n.cls });
   }
 
-  for (const p of PROGRAM_BOXES) {
+  for (const p of WS_BOXES) {
     nodes.push({
-      data: { id: p.id, label: p.label, cls: 'program', nodeType: 'program', progKey: p.key, parent: 'group_PROGRAMS', _prog: p._prog || {} },
-      classes: 'program'
+      data: { id: p.id, label: p.label, cls: 'workstream', nodeType: 'workstream', wsKey: p.key, parent: 'group_WORKSTREAMS', _ws: p._ws || {}, _engKey: p._engKey || '', _wsKey: p._wsKey || '', _engLabel: p._engLabel || '' },
+      classes: 'workstream'
     });
   }
 
@@ -1117,12 +1180,12 @@ function buildElements() {
     });
   }
 
-  for (let i = 0; i < PROGRAM_LINKS.length; i++) {
-    const [f, t, prog] = PROGRAM_LINKS[i];
+  for (let i = 0; i < WS_LINKS.length; i++) {
+    const [f, t, ws] = WS_LINKS[i];
     if (!nodeIds.has(f) || !nodeIds.has(t)) continue;
     edges.push({
-      data: { id: 'plink_' + i, source: f, target: t, edgeType: 'program_link', lineColor: '#68d391', lineWidth: 1.5, prog },
-      classes: 'program-link'
+      data: { id: 'wslink_' + i, source: f, target: t, edgeType: 'workstream_link', lineColor: '#68d391', lineWidth: 1.5, prog: ws },
+      classes: 'workstream-link'
     });
   }
 
@@ -1207,7 +1270,7 @@ function buildStylesheet() {
       }
     },
     {
-      selector: '.compound-programs',
+      selector: '.compound-workstreams',
       style: {
         'background-color': '#68d391',
         'background-opacity': 0.03,
@@ -1264,7 +1327,7 @@ function buildStylesheet() {
   });
 
   styles.push({
-    selector: '.program-link',
+    selector: '.workstream-link',
     style: {
       'line-style': 'dashed',
       'line-dash-pattern': [5, 3],
@@ -1300,7 +1363,7 @@ function buildLayoutOptions(useFallback) {
 
   // Only add constraints for edges where both nodes exist
   const allNodeIds = new Set(Object.keys(NODES));
-  PROGRAM_BOXES.forEach(p => allNodeIds.add(p.id));
+  WS_BOXES.forEach(p => allNodeIds.add(p.id));
 
   const relativePlacementConstraint = [];
   for (const [f, t] of REPORTING) {
@@ -1354,8 +1417,8 @@ function applyFilter() {
     if (vis.has(n.id())) { n.removeClass('hidden'); } else { n.addClass('hidden'); }
   });
 
-  cy.nodes('[nodeType="program"]').forEach(n => {
-    if (activePrograms.has(n.data('progKey'))) { n.removeClass('hidden'); } else { n.addClass('hidden'); }
+  cy.nodes('[nodeType="workstream"]').forEach(n => {
+    if (activeWsFilter.has(n.data('wsKey'))) { n.removeClass('hidden'); } else { n.addClass('hidden'); }
   });
 
   cy.edges().forEach(e => {
@@ -1364,8 +1427,8 @@ function applyFilter() {
     const prog = e.data('prog');
     const edgeType = e.data('edgeType');
     let hide = srcHidden || tgtHidden;
-    if (!hide && (edgeType === 'affiliation' || edgeType === 'program_link') && prog) {
-      hide = !activePrograms.has(prog);
+    if (!hide && (edgeType === 'affiliation' || edgeType === 'workstream_link') && prog) {
+      hide = !activeWsFilter.has(prog);
     }
     if (hide) { e.addClass('hidden'); } else { e.removeClass('hidden'); }
   });
@@ -1396,7 +1459,7 @@ window._onNodeSize = function(val) {
   document.getElementById('size-val').textContent = val + '%';
 
   cy.batch(function() {
-    cy.nodes('[nodeType="person"], [nodeType="program"]').forEach(n => {
+    cy.nodes('[nodeType="person"], [nodeType="workstream"]').forEach(n => {
       n.style({
         'width': d.w + 'px',
         'height': d.h + 'px',
@@ -1413,7 +1476,7 @@ window._onTextSize = function(val) {
   document.getElementById('text-size-val').textContent = val + '%';
 
   cy.batch(function() {
-    cy.nodes('[nodeType="person"], [nodeType="program"]').forEach(n => {
+    cy.nodes('[nodeType="person"], [nodeType="workstream"]').forEach(n => {
       n.style({
         'font-size': d.font + 'px',
         'text-max-width': d.maxText + 'px'
@@ -1467,18 +1530,18 @@ function buildSidebar() {
     }
     h += '</div>';
   } else {
-    // Fallback: program-based sidebar
-    h += '<div class="filter-section"><h3>Programs</h3>';
-    for (const parent of PROGRAM_TREE) {
+    // Fallback: workstream-based sidebar
+    h += '<div class="filter-section"><h3>Workstreams</h3>';
+    for (const parent of WS_TREE) {
       if (parent.children.length > 0) {
-        h += '<label class="filter-item"><input type="checkbox" id="prog-' + parent.key + '" checked onchange="window._onParent(\'' + parent.key + '\')">';
+        h += '<label class="filter-item"><input type="checkbox" id="ws-' + parent.key + '" checked onchange="window._onParent(\'' + parent.key + '\')">';
         h += '<span class="sw" style="background:#68d391"></span> ' + parent.label + '</label>';
         for (const c of parent.children) {
-          h += '<label class="filter-item child"><input type="checkbox" id="prog-' + c.key + '" checked onchange="window._onChild(\'' + parent.key + '\')">';
+          h += '<label class="filter-item child"><input type="checkbox" id="ws-' + c.key + '" checked onchange="window._onChild(\'' + parent.key + '\')">';
           h += c.label + '</label>';
         }
       } else {
-        h += '<label class="filter-item"><input type="checkbox" id="prog-' + parent.key + '" checked onchange="window._onStandalone()">';
+        h += '<label class="filter-item"><input type="checkbox" id="ws-' + parent.key + '" checked onchange="window._onStandalone()">';
         h += '<span class="sw" style="background:#68d391"></span> ' + parent.label + '</label>';
       }
     }
@@ -1508,12 +1571,12 @@ window.resetFilters = function() {
     activeWorkstreams = new Set(ALL_WS_KEYS);
     syncEngagements();
   } else {
-    for (const p of PROGRAM_TREE) {
-      const el = document.getElementById('prog-' + p.key);
+    for (const p of WS_TREE) {
+      const el = document.getElementById('ws-' + p.key);
       el.checked = true; el.indeterminate = false;
-      for (const c of p.children) document.getElementById('prog-' + c.key).checked = true;
+      for (const c of p.children) document.getElementById('ws-' + c.key).checked = true;
     }
-    activePrograms = new Set(ALL_PROG_KEYS);
+    activeWsFilter = new Set(ALL_WS_FILTER_KEYS);
   }
   applyFilter();
 };
@@ -1618,9 +1681,9 @@ function showDetail(nodeData) {
     h += '<div class="detail-section"><h4>Notes</h4><div class="detail-val">' + escHtml(p.notes) + '</div></div>';
   }
 
-  // Programs
+  // Workstreams
   if (nodeData.progs && nodeData.progs.length) {
-    h += '<div class="detail-section"><h4>Programs</h4><div>' + nodeData.progs.map(p => '<span class="detail-badge">' + escHtml(p) + '</span>').join('') + '</div></div>';
+    h += '<div class="detail-section"><h4>Workstreams</h4><div>' + nodeData.progs.map(p => '<span class="detail-badge">' + escHtml(p) + '</span>').join('') + '</div></div>';
   }
 
   // Any remaining fields we haven't shown
@@ -1641,62 +1704,87 @@ function showDetail(nodeData) {
   detailPanel.classList.add('open');
 }
 
-function showProgramDetail(nodeData) {
-  const p = nodeData._prog || {};
-  const name = p.name || p.description || nodeData.progKey || nodeData.label;
-  const progKey = nodeData.progKey || p.key || '';
+function showRegistryWorkstreamDetail(nodeData) {
+  const ws = nodeData._ws || {};
+  const wsKey = nodeData.wsKey || '';
+  const engKey = nodeData._engKey || '';
+  const engLabel = nodeData._engLabel || '';
 
-  detailHeaderLabel.textContent = 'Program';
+  detailHeaderLabel.textContent = 'Workstream';
   let h = '';
 
-  // Program name with green accent
-  h += '<div class="detail-prog-header">' + escHtml(progKey.replace(/_/g, ' ')) + '</div>';
-  if (p.description) h += '<div class="detail-title">' + escHtml(p.description) + '</div>';
-
-  // Status badge
-  if (p.status) {
-    h += '<div style="margin:8px 0 12px"><span class="detail-status">' + escHtml(p.status) + '</span></div>';
+  // Engagement context
+  if (engLabel) {
+    h += '<div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:4px">' + escHtml(engLabel) + '</div>';
   }
 
-  // Key fields
+  // Workstream name with green accent
+  h += '<div class="detail-ws-header">' + escHtml(ws.label || wsKey.replace(/_/g, ' ')) + '</div>';
+
+  // Status badge
+  const status = ws.status || 'active';
+  h += '<div style="margin:8px 0 12px"><span class="detail-status">' + escHtml(status) + '</span>';
+
+  // Governance badge
+  const gov = ws.governance || '';
+  if (gov) {
+    const govLabel = gov.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    h += ' <span class="detail-badge">' + escHtml(govLabel) + '</span>';
+  }
+  h += '</div>';
+
+  // RACI section
+  const raci = ws.raci || {};
+  const raciRoles = [
+    ['responsible', 'R — Responsible'],
+    ['accountable', 'A — Accountable'],
+    ['consulted', 'C — Consulted'],
+    ['informed', 'I — Informed']
+  ];
+  let hasRaci = false;
+  for (const [role] of raciRoles) {
+    if ((raci[role] || []).length > 0) { hasRaci = true; break; }
+  }
+  if (hasRaci) {
+    h += '<div class="detail-section"><h4>RACI</h4>';
+    for (const [role, label] of raciRoles) {
+      const names = raci[role] || [];
+      if (names.length === 0) continue;
+      h += '<div style="margin-bottom:6px"><span style="font-size:10px;color:var(--text-muted);font-weight:500">' + escHtml(label) + '</span><div>';
+      for (const name of names) {
+        const cid = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/(^_|_$)/g, '');
+        h += '<span class="detail-contact-chip" onclick="window._focusNode(\'' + cid + '\')">' + escHtml(name) + '</span>';
+      }
+      h += '</div></div>';
+    }
+    h += '</div>';
+  }
+
+  // Sub-workstreams (if this is an engagement-level entry with nested workstreams)
+  const subWs = ws.workstreams || {};
+  if (Object.keys(subWs).length > 0) {
+    h += '<div class="detail-section"><h4>Sub-Workstreams</h4><div>';
+    for (const [subKey, subWsData] of Object.entries(subWs)) {
+      h += '<span class="detail-badge">' + escHtml(subWsData.label || subKey) + '</span>';
+    }
+    h += '</div></div>';
+  }
+
+  // Key fields (legacy compat)
   const fields = [
-    ['governance', 'Governance'],
     ['cloud_provider', 'Cloud Provider'],
     ['budget', 'Budget'],
   ];
   for (const [key, label] of fields) {
-    if (p[key]) {
-      h += '<div class="detail-section"><h4>' + label + '</h4><div class="detail-val">' + escHtml(p[key]) + '</div></div>';
+    if (ws[key]) {
+      h += '<div class="detail-section"><h4>' + label + '</h4><div class="detail-val">' + escHtml(ws[key]) + '</div></div>';
     }
-  }
-
-  // Parent program
-  if (p.parent) {
-    h += '<div class="detail-section"><h4>Parent Program</h4><div class="detail-val">' + escHtml(p.parent.replace(/_/g, ' ')) + '</div></div>';
-  }
-
-  // Sub-programs
-  if (p.sub_programs && p.sub_programs.length) {
-    const subs = p.sub_programs.map(s => typeof s === 'string' ? s : s.key || s.name);
-    h += '<div class="detail-section"><h4>Sub-Programs</h4><div>';
-    h += subs.map(s => '<span class="detail-badge">' + escHtml(s.replace(/_/g, ' ')) + '</span>').join('');
-    h += '</div></div>';
-  }
-
-  // Key contacts (clickable — navigate to person node)
-  if (p.key_altera_contacts && p.key_altera_contacts.length) {
-    h += '<div class="detail-section"><h4>Key Contacts</h4><div>';
-    for (const contact of p.key_altera_contacts) {
-      const cid = contact.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/(^_|_$)/g, '');
-      h += '<span class="detail-contact-chip" onclick="window._focusNode(\'' + cid + '\')">' + escHtml(contact) + '</span>';
-    }
-    h += '</div></div>';
   }
 
   // Any extra fields
-  const shownKeys = new Set(['key','name','description','status','governance','cloud_provider',
-    'budget','parent','sub_programs','key_altera_contacts']);
-  const extra = Object.entries(p).filter(([k,v]) => !shownKeys.has(k) && v != null && v !== '' && v !== 'N/A');
+  const shownKeys = new Set(['key','name','label','description','status','governance','raci',
+    'workstreams','cloud_provider','budget','parent','sub_programs','key_altera_contacts']);
+  const extra = Object.entries(ws).filter(([k,v]) => !shownKeys.has(k) && v != null && v !== '' && v !== 'N/A');
   for (const [k, v] of extra) {
     const label = k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     const val = typeof v === 'object' ? JSON.stringify(v) : String(v);
@@ -1705,12 +1793,12 @@ function showProgramDetail(nodeData) {
     }
   }
 
-  // Knowledge log entries for this program
-  const progKnowledge = KNOWLEDGE_BY_PROG[progKey] || [];
-  h += renderKnowledgeSection(progKnowledge, 'Knowledge Log');
+  // Knowledge log entries for this workstream
+  const wsKnowledge = KNOWLEDGE_BY_WS_KEY[wsKey] || [];
+  h += renderKnowledgeSection(wsKnowledge, 'Knowledge Log');
 
   detailBody.innerHTML = h;
-  detailBody.classList.toggle('no-knowledge', !progKnowledge.length);
+  detailBody.classList.toggle('no-knowledge', !wsKnowledge.length);
   detailPanel.classList.add('open');
 }
 
@@ -1760,7 +1848,7 @@ window._showWsDocs = function(wsKey) {
 
   detailHeaderLabel.textContent = 'Documents';
   let h = '';
-  h += '<div class="detail-prog-header" style="color:var(--accent)">' + escHtml(wsLabel) + '</div>';
+  h += '<div class="detail-ws-header" style="color:var(--accent)">' + escHtml(wsLabel) + '</div>';
   h += '<div class="detail-title" style="margin-bottom:14px">' + docs.length + ' document' + (docs.length !== 1 ? 's' : '') + '</div>';
 
   const typeIcons = { pptx: 'PPTX', xlsx: 'XLSX', docx: 'DOCX', pdf: 'PDF' };
@@ -1875,8 +1963,8 @@ cy.on('tap', 'node[nodeType="person"]', function(e) {
   showDetail(e.target.data());
 });
 
-cy.on('tap', 'node[nodeType="program"]', function(e) {
-  showProgramDetail(e.target.data());
+cy.on('tap', 'node[nodeType="workstream"]', function(e) {
+  showRegistryWorkstreamDetail(e.target.data());
 });
 
 // Click on background closes detail panel

@@ -16,7 +16,8 @@ The knowledge extractor is Claude-driven (not a Python script). Classification a
 4. Read `index.json` from the output directory
 5. Read `<engagement>/engagement_config.json` for workstream classification rules
 6. Read `.local/knowledge_checkpoint.json` if it exists (skip if reprocessing)
-7. Read the org chart at `{{COMPANY_DIR}}/org_chart.json` to resolve program membership
+7. Read `{{COMPANY_DIR}}/engagement_registry.json` to resolve workstream membership via RACI contacts
+8. Read the org chart at `{{COMPANY_DIR}}/org_chart.json` for people context
 
 ## Status email auto-detection
 
@@ -76,7 +77,7 @@ This keeps the two pipelines connected — email review surfaces attachments, do
 For each remaining email, read its body file (`*_body.txt`) and classify it against each workstream in `engagement_config.workstreams`. An email matches a workstream if ANY of:
 - Subject or body contains a keyword from that workstream's `keywords_subject` or `keywords_body` (case-insensitive)
 - Sender or any recipient email address is in that workstream's `people_associations`
-- Sender or any recipient is a `key_altera_contacts` member of a program listed in that workstream's `programs` (cross-reference via the org chart's `key_programs` section)
+- Sender or any recipient is in the RACI for a workstream in `engagement_registry.json` (cross-reference via registry RACI contacts)
 
 An email can match multiple workstreams. If it matches none, skip it silently.
 
@@ -85,7 +86,7 @@ An email can match multiple workstreams. If it matches none, skip it silently.
 For each classified email, extract knowledge nuggets. A nugget has:
 - **type**: one of the `knowledge_types` from config (decision, technical, status, action, blocker, timeline, budget, risk)
 - **summary**: one-line summary of the nugget
-- **programs**: which programs from the org chart this relates to (array)
+- **workstreams**: which workstreams from the engagement registry this relates to (array, format: `engagement/workstream`)
 - **detail**: 1-3 sentences of context
 - **email_id**: the email's ID from index.json
 
@@ -107,10 +108,10 @@ An email may yield 0 nuggets (routine/FYI with no extractable knowledge) or mult
 8. Show overall stats first (emails to process, workstreams detected)
 9. Walk through each email **one at a time**. For each email, show:
    - Subject, sender, date, matched workstreams
-   - Extracted nuggets (type, summary, detail, programs)
+   - Extracted nuggets (type, summary, detail, workstreams)
 10. For each email's nuggets, ask:
     - **Accept** — append these nuggets as-is
-    - **Edit** — let me modify the nuggets (change type, summary, detail, programs, or split/merge)
+    - **Edit** — let me modify the nuggets (change type, summary, detail, workstreams, or split/merge)
     - **Skip** — don't append, but still mark as processed in checkpoint
     - **Reclassify** — change which workstreams this email maps to, then re-present
 11. After all emails are reviewed, show final summary of accepted nuggets before writing
@@ -141,7 +142,7 @@ Entries are added by `/extract-knowledge` and should not be manually reordered o
 ```markdown
 ### [TYPE] Summary line here
 - **Source**: "Subject line" (Sender Name → Recipient Name)
-- **Programs**: program_a, program_b
+- **Workstreams**: enclave/hybrid_poc, cyber/general
 - **Detail**: 1-3 sentences of extracted context.
 - **Email ID**: `abc123def456`
 ```

@@ -14,7 +14,8 @@ The document knowledge extractor is Claude-driven (not a Python script). Classif
 2. Read `{{COMPANY_DIR}}/file_index.json` for document metadata
 3. Read `<engagement>/engagement_config.json` for workstream classification rules
 4. Read `.local/doc_knowledge_checkpoint.json` if it exists (skip if reprocessing)
-5. Read the org chart at `{{COMPANY_DIR}}/org_chart.json` to resolve program membership
+5. Read `{{COMPANY_DIR}}/engagement_registry.json` to resolve workstream membership via RACI contacts
+6. Read the org chart at `{{COMPANY_DIR}}/org_chart.json` for people context
 6. Read `{{COMPANY_DIR}}/doc_triage.json` for triage state
 
 ## Interactive triage (first-run or new files)
@@ -64,7 +65,7 @@ Report how many summaries are available and how many are new.
 For each unprocessed summary, read the full markdown content and extract knowledge nuggets. A nugget has:
 - **type**: one of the `knowledge_types` from config (decision, technical, status, action, blocker, timeline, budget, risk)
 - **summary**: one-line summary of the nugget
-- **programs**: which programs from the org chart this relates to (array)
+- **workstreams**: which workstreams from the engagement registry this relates to (array, format: `engagement/workstream`)
 - **detail**: 1-3 sentences of context
 - **source_file**: the relative path to the source document
 
@@ -86,10 +87,10 @@ Documents often produce more nuggets per item than emails (a 20-slide deck may y
 8. Show overall stats first (summaries to process, workstreams detected)
 9. Walk through each document **one at a time**. For each document, show:
    - Source filename, file type, workstream
-   - Each extracted nugget (type, summary, detail, programs)
+   - Each extracted nugget (type, summary, detail, workstreams)
 10. For each nugget, ask:
     - **Accept** — include this nugget
-    - **Edit** — modify the nugget (change type, summary, detail, programs)
+    - **Edit** — modify the nugget (change type, summary, detail, workstreams)
     - **Skip** — don't include this nugget
 11. After all documents reviewed, show final summary of accepted nuggets before writing
 
@@ -119,7 +120,7 @@ Entries are added by `/extract-doc-knowledge` and should not be manually reorder
 ```markdown
 ### [TYPE] Summary line here
 - **Source**: "filename.pptx" (engagement/workstream/)
-- **Programs**: program_a, program_b
+- **Workstreams**: enclave/hybrid_poc, cyber/general
 - **Detail**: 1-3 sentences of extracted context.
 - **Source File**: `enclave/03-Hybrid-Infrastructure-PoC/Cost-Analysis/AWS Cost Analysis.pptx`
 ```
@@ -137,7 +138,7 @@ After writing (or skipping), update `.local/doc_knowledge_checkpoint.json`:
 ## Important notes
 
 - Documents can yield many more nuggets than emails — a status deck might have 5+ actionable items
-- Cross-reference the org chart's `key_programs` section to identify which programs a document relates to
+- Cross-reference `engagement_registry.json` RACI contacts to identify which workstreams a document relates to
 - When classifying a document to workstreams, use the same rules as email classification but also consider the document's engagement/workstream from the file index
 - Do NOT extract knowledge from template files, blank forms, or purely formatting-only content
 - When in doubt about a nugget's type, prefer "technical" for content-heavy documents and "status" for updates

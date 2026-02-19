@@ -8,14 +8,15 @@ Arguments: $ARGUMENTS should be a workstream slug (from engagement_config.json) 
 
 1. Parse arguments for which workstream(s) to brief
 2. Read `<engagement>/engagement_config.json` to resolve workstream paths
-3. Read the org chart at `{{COMPANY_DIR}}/org_chart.json` for program context
+3. Read `{{COMPANY_DIR}}/engagement_registry.json` for workstream context
+4. Read the org chart at `{{COMPANY_DIR}}/org_chart.json` for people context
 
 ## For each requested workstream
 
 4. Resolve the knowledge log path: `<engagement>/<workstream.output_dir>/KNOWLEDGE_LOG.md`
 5. If the log doesn't exist, report "No knowledge log found for <workstream.label>" and skip
 6. Read the full KNOWLEDGE_LOG.md
-7. Read the org chart's `key_programs` section for programs listed in the workstream's config
+7. Read the engagement registry for workstream RACI and governance context
 
 ## Synthesis
 
@@ -64,7 +65,7 @@ Stats table:
 | Total entries | N |
 | Date range | earliest — latest |
 | Entry types | breakdown by type |
-| Programs referenced | list |
+| Workstreams referenced | list |
 | Unique email sources | N |
 ```
 
