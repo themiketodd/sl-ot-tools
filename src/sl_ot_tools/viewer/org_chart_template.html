@@ -310,6 +310,26 @@
     font-size: 11.5px; color: var(--text-secondary); line-height: 1.55;
     white-space: pre-wrap;
   }
+  .detail-prog-header {
+    font-size: 14px; font-weight: 600; color: var(--green);
+    margin-bottom: 2px; line-height: 1.3;
+  }
+  .detail-status {
+    display: inline-block; padding: 3px 10px;
+    background: var(--green-dim); border: 1px solid rgba(92,224,160,0.25);
+    border-radius: 10px; font-size: 11px; color: var(--green);
+    margin-bottom: 12px;
+  }
+  .detail-contact-chip {
+    display: inline-block; padding: 3px 10px;
+    background: var(--bg-surface); border: 1px solid var(--border);
+    border-radius: 10px; font-size: 11px; color: var(--accent);
+    margin: 2px 4px 2px 0; cursor: pointer;
+    transition: border-color .15s, color .15s;
+  }
+  .detail-contact-chip:hover {
+    border-color: var(--accent); color: var(--accent-hover);
+  }
   .hint kbd {
     display: inline-block; padding: 1px 4px;
     background: var(--bg-surface); border: 1px solid var(--border);
@@ -610,7 +630,7 @@ function transformOrgChart(data) {
       const progId = progKey + '_p';
       if (!progBoxSet.has(progKey)) {
         progBoxSet.add(progKey);
-        programBoxes.push({ key: progKey, id: progId, label: prog.name || progKey });
+        programBoxes.push({ key: progKey, id: progId, label: prog.name || progKey, _prog: prog });
       }
     }
 
@@ -912,7 +932,7 @@ function buildElements() {
 
   for (const p of PROGRAM_BOXES) {
     nodes.push({
-      data: { id: p.id, label: p.label, cls: 'program', nodeType: 'program', progKey: p.key, parent: 'group_PROGRAMS' },
+      data: { id: p.id, label: p.label, cls: 'program', nodeType: 'program', progKey: p.key, parent: 'group_PROGRAMS', _prog: p._prog || {} },
       classes: 'program'
     });
   }
@@ -1471,6 +1491,83 @@ function showDetail(nodeData) {
   detailPanel.classList.add('open');
 }
 
+function showProgramDetail(nodeData) {
+  const p = nodeData._prog || {};
+  const name = p.name || p.description || nodeData.progKey || nodeData.label;
+  const progKey = nodeData.progKey || p.key || '';
+
+  detailHeaderLabel.textContent = 'Program';
+  let h = '';
+
+  // Program name with green accent
+  h += '<div class="detail-prog-header">' + escHtml(progKey.replace(/_/g, ' ')) + '</div>';
+  if (p.description) h += '<div class="detail-title">' + escHtml(p.description) + '</div>';
+
+  // Status badge
+  if (p.status) {
+    h += '<div style="margin:8px 0 12px"><span class="detail-status">' + escHtml(p.status) + '</span></div>';
+  }
+
+  // Key fields
+  const fields = [
+    ['governance', 'Governance'],
+    ['cloud_provider', 'Cloud Provider'],
+    ['budget', 'Budget'],
+  ];
+  for (const [key, label] of fields) {
+    if (p[key]) {
+      h += '<div class="detail-section"><h4>' + label + '</h4><div class="detail-val">' + escHtml(p[key]) + '</div></div>';
+    }
+  }
+
+  // Parent program
+  if (p.parent) {
+    h += '<div class="detail-section"><h4>Parent Program</h4><div class="detail-val">' + escHtml(p.parent.replace(/_/g, ' ')) + '</div></div>';
+  }
+
+  // Sub-programs
+  if (p.sub_programs && p.sub_programs.length) {
+    const subs = p.sub_programs.map(s => typeof s === 'string' ? s : s.key || s.name);
+    h += '<div class="detail-section"><h4>Sub-Programs</h4><div>';
+    h += subs.map(s => '<span class="detail-badge">' + escHtml(s.replace(/_/g, ' ')) + '</span>').join('');
+    h += '</div></div>';
+  }
+
+  // Key contacts (clickable — navigate to person node)
+  if (p.key_altera_contacts && p.key_altera_contacts.length) {
+    h += '<div class="detail-section"><h4>Key Contacts</h4><div>';
+    for (const contact of p.key_altera_contacts) {
+      const cid = contact.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/(^_|_$)/g, '');
+      h += '<span class="detail-contact-chip" onclick="window._focusNode(\'' + cid + '\')">' + escHtml(contact) + '</span>';
+    }
+    h += '</div></div>';
+  }
+
+  // Any extra fields
+  const shownKeys = new Set(['key','name','description','status','governance','cloud_provider',
+    'budget','parent','sub_programs','key_altera_contacts']);
+  const extra = Object.entries(p).filter(([k,v]) => !shownKeys.has(k) && v != null && v !== '' && v !== 'N/A');
+  for (const [k, v] of extra) {
+    const label = k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    const val = typeof v === 'object' ? JSON.stringify(v) : String(v);
+    if (val.length > 0 && val !== '[]' && val !== 'null') {
+      h += '<div class="detail-section"><h4>' + escHtml(label) + '</h4><div class="detail-val">' + escHtml(val) + '</div></div>';
+    }
+  }
+
+  detailBody.innerHTML = h;
+  detailPanel.classList.add('open');
+}
+
+// Focus a node by ID (used by contact chips in program detail)
+window._focusNode = function(nodeId) {
+  const node = cy.$('#' + nodeId);
+  if (node.length) {
+    cy.animate({ center: { eles: node }, zoom: Math.max(cy.zoom(), 1.5) }, { duration: 300 });
+    setTimeout(() => showDetail(node.data()), 350);
+  }
+};
+
 // Resize handle
 (function() {
   const handle = document.getElementById('detail-resize');
@@ -1549,6 +1646,10 @@ cy.on('dbltap', function(e) {
 
 cy.on('tap', 'node[nodeType="person"]', function(e) {
   showDetail(e.target.data());
+});
+
+cy.on('tap', 'node[nodeType="program"]', function(e) {
+  showProgramDetail(e.target.data());
 });
 
 // Click on background closes detail panel
