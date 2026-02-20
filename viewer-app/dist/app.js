@@ -392,27 +392,31 @@ function initTerminal() {
   fitAddon.fit();
   window.addEventListener('resize', () => fitAddon.fit());
 
-  // Listen for output from the Rust backend
-  listen('terminal-output', (event) => {
-    if (term && event.payload) {
-      term.write(event.payload);
-    }
-  });
-
   // Send keystrokes to the backend
   term.onData((data) => {
     invoke('write_terminal', { data }).catch(() => {});
   });
 
   // Auto-spawn the terminal process
+  // Set up event listener BEFORE spawning so we don't miss early output
+  console.log('[TERM] Setting up terminal-output listener...');
+  listen('terminal-output', (event) => {
+    console.log('[TERM] Received event, payload length:', event.payload?.length);
+    if (term && event.payload) {
+      term.write(event.payload);
+    }
+  }).then(() => {
+    console.log('[TERM] Listener registered OK');
+  });
+
   console.log('[TERM] Spawning terminal...');
   term.writeln('\x1b[90mConnecting to shell...\x1b[0m\r\n');
-  invoke('spawn_terminal').then(() => {
-    console.log('[TERM] spawn_terminal succeeded');
+  invoke('spawn_terminal').then((result) => {
+    console.log('[TERM] spawn_terminal returned:', result);
+    term.writeln(`\x1b[90mShell: ${result}\x1b[0m\r\n`);
   }).catch((err) => {
     console.error('[TERM] spawn_terminal failed:', err);
     term.writeln(`\x1b[31mFailed to start shell: ${err}\x1b[0m`);
-    term.writeln('\x1b[90mThis feature requires WSL on Windows.\x1b[0m');
   });
 }
 

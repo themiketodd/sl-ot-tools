@@ -191,7 +191,7 @@ fn get_repo_from_args() -> Option<String> {
     std::env::args().nth(1)
 }
 
-// ── Terminal (spawn wsl.exe and pipe I/O) ──────────────────────────────────
+// ── Terminal (spawn shell and pipe I/O) ─────────────────────────────────────
 
 struct TerminalProcess {
     stdin: std::process::ChildStdin,
@@ -200,81 +200,127 @@ struct TerminalProcess {
 type TerminalState = Arc<Mutex<Option<TerminalProcess>>>;
 
 #[tauri::command]
-fn spawn_terminal(state: tauri::State<'_, TerminalState>, app: tauri::AppHandle) -> Result<(), String> {
+fn spawn_terminal(state: tauri::State<'_, TerminalState>, app: tauri::AppHandle) -> Result<String, String> {
     let mut guard = state.lock().map_err(|e| e.to_string())?;
     if guard.is_some() {
-        return Ok(()); // Already running
+        return Ok("already running".to_string());
     }
 
-    eprintln!("Spawning terminal process...");
+    eprintln!("[TERM] spawn_terminal called");
 
-    // Try wsl.exe first, fall back to cmd.exe
-    let (program, args): (&str, &[&str]) = if cfg!(target_os = "windows") {
-        // Check if wsl.exe exists
-        if std::path::Path::new("C:\\Windows\\System32\\wsl.exe").exists() {
-            ("wsl.exe", &[])
+    // Determine shell to use
+    let program;
+    let args: Vec<&str>;
+
+    if cfg!(target_os = "windows") {
+        let wsl_path = "C:\\Windows\\System32\\wsl.exe";
+        let wsl_exists = std::path::Path::new(wsl_path).exists();
+        eprintln!("[TERM] Windows detected. wsl.exe exists at System32: {}", wsl_exists);
+
+        if wsl_exists {
+            program = "wsl.exe".to_string();
+            args = vec![];
         } else {
-            ("cmd.exe", &[])
+            program = "cmd.exe".to_string();
+            args = vec![];
         }
     } else {
-        ("bash", &[])
-    };
+        program = "bash".to_string();
+        args = vec![];
+    }
 
-    eprintln!("Using shell: {}", program);
+    eprintln!("[TERM] Spawning: {} {:?}", program, args);
 
-    let mut child = Command::new(program)
-        .args(args)
+    let mut child = Command::new(&program)
+        .args(&args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("Failed to spawn {}: {}", program, e))?;
+        .map_err(|e| {
+            let msg = format!("[TERM] Failed to spawn {}: {}", program, e);
+            eprintln!("{}", msg);
+            msg
+        })?;
 
-    let stdin = child.stdin.take().ok_or("Failed to get stdin")?;
-    let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
-    let stderr = child.stderr.take().ok_or("Failed to get stderr")?;
+    eprintln!("[TERM] Process spawned, pid: {:?}", child.id());
+
+    let stdin = child.stdin.take().ok_or("[TERM] Failed to get stdin")?;
+    let stdout = child.stdout.take().ok_or("[TERM] Failed to get stdout")?;
+    let stderr = child.stderr.take().ok_or("[TERM] Failed to get stderr")?;
 
     *guard = Some(TerminalProcess { stdin });
 
-    // Stream stdout to frontend
+    // Stream stdout to frontend via events
     let app_stdout = app.clone();
     std::thread::spawn(move || {
-        let reader = BufReader::new(stdout);
-        for line in reader.lines() {
-            match line {
-                Ok(text) => {
-                    let _ = app_stdout.emit("terminal-output", format!("{}\r\n", text));
+        eprintln!("[TERM] stdout reader thread started");
+        let mut buf = [0u8; 4096];
+        use std::io::Read;
+        let mut reader = stdout;
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => {
+                    eprintln!("[TERM] stdout EOF");
+                    break;
                 }
-                Err(_) => break,
+                Ok(n) => {
+                    let text = String::from_utf8_lossy(&buf[..n]).to_string();
+                    eprintln!("[TERM] stdout ({} bytes): {:?}", n, &text[..text.len().min(100)]);
+                    let result = app_stdout.emit("terminal-output", &text);
+                    eprintln!("[TERM] emit result: {:?}", result);
+                }
+                Err(e) => {
+                    eprintln!("[TERM] stdout error: {}", e);
+                    break;
+                }
             }
         }
-        let _ = app_stdout.emit("terminal-output", "\r\n[Process exited]\r\n".to_string());
+        let _ = app_stdout.emit("terminal-output", "\r\n[Process exited]\r\n");
     });
 
     // Stream stderr to frontend
     let app_stderr = app.clone();
     std::thread::spawn(move || {
-        let reader = BufReader::new(stderr);
-        for line in reader.lines() {
-            match line {
-                Ok(text) => {
-                    let _ = app_stderr.emit("terminal-output", format!("{}\r\n", text));
+        eprintln!("[TERM] stderr reader thread started");
+        let mut buf = [0u8; 4096];
+        use std::io::Read;
+        let mut reader = stderr;
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => {
+                    eprintln!("[TERM] stderr EOF");
+                    break;
                 }
-                Err(_) => break,
+                Ok(n) => {
+                    let text = String::from_utf8_lossy(&buf[..n]).to_string();
+                    eprintln!("[TERM] stderr ({} bytes): {:?}", n, &text[..text.len().min(100)]);
+                    let _ = app_stderr.emit("terminal-output", &text);
+                }
+                Err(e) => {
+                    eprintln!("[TERM] stderr error: {}", e);
+                    break;
+                }
             }
         }
     });
 
     // Wait for child to exit in background
     std::thread::spawn(move || {
-        let _ = child.wait();
+        match child.wait() {
+            Ok(status) => eprintln!("[TERM] Process exited: {}", status),
+            Err(e) => eprintln!("[TERM] Wait error: {}", e),
+        }
     });
 
-    Ok(())
+    let msg = format!("spawned {} (pid {})", program, "?");
+    eprintln!("[TERM] {}", msg);
+    Ok(msg)
 }
 
 #[tauri::command]
 fn write_terminal(state: tauri::State<'_, TerminalState>, data: String) -> Result<(), String> {
+    eprintln!("[TERM] write_terminal: {:?}", &data[..data.len().min(50)]);
     let mut guard = state.lock().map_err(|e| e.to_string())?;
     if let Some(ref mut proc) = *guard {
         proc.stdin
