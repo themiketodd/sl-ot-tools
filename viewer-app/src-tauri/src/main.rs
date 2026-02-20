@@ -1,7 +1,8 @@
-// Prevents additional console window on Windows in release
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// Keep console visible for now so we can see errors
+// TODO: re-enable once stable: #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::path::PathBuf;
+use std::io::Write;
 #[tauri::command]
 fn read_company_data(repo_path: String) -> Result<serde_json::Value, String> {
     let base = PathBuf::from(&repo_path);
@@ -168,11 +169,41 @@ fn get_repo_from_args() -> Option<String> {
 }
 
 fn main() {
-    tauri::Builder::default()
+    // Log to file next to the exe for debugging
+    let log_path = std::env::current_exe()
+        .unwrap_or_default()
+        .parent()
+        .unwrap_or(std::path::Path::new("."))
+        .join("sl-ot-viewer.log");
+
+    let log = |msg: &str| {
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+        {
+            let _ = writeln!(f, "{}", msg);
+        }
+        eprintln!("{}", msg);
+    };
+
+    log("Starting sl-ot-viewer...");
+
+    let result = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![read_company_data, get_repo_from_args])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .run(tauri::generate_context!());
+
+    match result {
+        Ok(()) => log("Application exited normally."),
+        Err(e) => {
+            let msg = format!("Application error: {}", e);
+            log(&msg);
+            // Keep console open so user can read the error
+            eprintln!("\nPress Enter to exit...");
+            let _ = std::io::stdin().read_line(&mut String::new());
+        }
+    }
 }
