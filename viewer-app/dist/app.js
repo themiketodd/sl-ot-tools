@@ -1,4 +1,5 @@
 const { invoke } = window.__TAURI__.core;
+const { listen } = window.__TAURI__.event;
 const { open } = window.__TAURI__.dialog;
 
 // ── State ──────────────────────────────────────────────────────────────────
@@ -59,7 +60,6 @@ function buildGraph(data) {
     });
   }
 
-  // Add people from all sections
   for (const section of ['leadership', 'people', 'team']) {
     const people = orgChart[section] || [];
     for (const person of people) {
@@ -67,7 +67,6 @@ function buildGraph(data) {
     }
   }
 
-  // External ecosystem
   const ext = orgChart.external_ecosystem || {};
   const extEntries = Array.isArray(ext) ? ext : Object.values(ext);
   for (const org of extEntries) {
@@ -79,7 +78,6 @@ function buildGraph(data) {
     }
   }
 
-  // Add reporting edges
   for (const el of elements) {
     if (el.group !== 'nodes') continue;
     const d = el.data;
@@ -103,7 +101,6 @@ function buildGraph(data) {
     }
   }
 
-  // Add workstream nodes from registry
   const registry = data.engagement_registry || {};
   const engagements = registry.engagements || {};
   for (const [engKey, eng] of Object.entries(engagements)) {
@@ -127,7 +124,6 @@ function buildGraph(data) {
         },
       });
 
-      // RACI edges
       const raci = ws.raci || {};
       for (const role of ['responsible', 'accountable', 'consulted', 'informed']) {
         for (const name of raci[role] || []) {
@@ -175,10 +171,7 @@ function initCytoscape(elements) {
       },
       {
         selector: 'node[type="workstream"]',
-        style: {
-          'shape': 'round-rectangle',
-          'border-style': 'dashed',
-        },
+        style: { 'shape': 'round-rectangle', 'border-style': 'dashed' },
       },
       {
         selector: 'edge[edgeType="reporting"]',
@@ -217,10 +210,7 @@ function initCytoscape(elements) {
     wheelSensitivity: 0.3,
   });
 
-  // Run layout
   runLayout();
-
-  // Node click → detail panel
   cy.on('tap', 'node', (evt) => showDetail(evt.target.data()));
 }
 
@@ -316,7 +306,6 @@ function buildSidebar(data) {
   const sidebar = document.getElementById('sidebar');
   let html = '';
 
-  // People summary
   const orgChart = data.org_chart || {};
   const totalPeople =
     (orgChart.leadership || []).length +
@@ -325,7 +314,6 @@ function buildSidebar(data) {
   html += `<h3>People</h3>`;
   html += `<div class="sidebar-item">${data.company_config?.company || 'Company'} <span class="badge">${totalPeople}</span></div>`;
 
-  // Engagements from registry
   const registry = data.engagement_registry || {};
   const engagements = registry.engagements || {};
   if (Object.keys(engagements).length) {
@@ -345,7 +333,6 @@ function buildSidebar(data) {
     }
   }
 
-  // Knowledge summary
   const knowledge = data.knowledge || [];
   if (knowledge.length) {
     html += `<h3>Knowledge</h3>`;
@@ -357,6 +344,7 @@ function buildSidebar(data) {
 
 // ── Terminal ───────────────────────────────────────────────────────────────
 let term = null;
+let termLineBuf = '';
 
 function initTerminal() {
   const container = document.getElementById('terminal-container');
@@ -370,19 +358,35 @@ function initTerminal() {
       selectionBackground: '#2a4a7a',
     },
     cursorBlink: true,
+    convertEol: true,
   });
 
   const fitAddon = new FitAddon.FitAddon();
   term.loadAddon(fitAddon);
   term.open(container);
   fitAddon.fit();
-
-  term.writeln('\x1b[90m  Terminal placeholder — Claude Code integration coming soon\x1b[0m');
-  term.writeln('\x1b[90m  In the full version, this will run an interactive Claude Code session\x1b[0m');
-  term.writeln('');
-
-  // Resize on window resize
   window.addEventListener('resize', () => fitAddon.fit());
+
+  // Listen for output from the Rust backend
+  listen('terminal-output', (event) => {
+    if (term && event.payload) {
+      term.write(event.payload);
+    }
+  });
+
+  // Send keystrokes to the backend
+  term.onData((data) => {
+    invoke('write_terminal', { data }).catch(() => {});
+  });
+
+  // Auto-spawn the terminal process
+  term.writeln('\x1b[90mConnecting to shell...\x1b[0m\r\n');
+  invoke('spawn_terminal').then(() => {
+    // Terminal spawned — output will arrive via events
+  }).catch((err) => {
+    term.writeln(`\x1b[31mFailed to start shell: ${err}\x1b[0m`);
+    term.writeln('\x1b[90mThis feature requires WSL on Windows.\x1b[0m');
+  });
 }
 
 // ── Resize handle ──────────────────────────────────────────────────────────
@@ -409,7 +413,6 @@ function initResizeHandle() {
     document.removeEventListener('mouseup', onRelease);
   }
 
-  // Toggle terminal
   document.getElementById('btn-toggle-terminal').addEventListener('click', () => {
     const isHidden = termPane.style.display === 'none';
     termPane.style.display = isHidden ? 'flex' : 'none';
@@ -439,18 +442,29 @@ async function promptOpenRepo() {
   if (selected) openRepo(selected);
 }
 
+// ── Test: read local JSON ──────────────────────────────────────────────────
+async function testLocalJson() {
+  try {
+    const data = await invoke('read_local_json', { filename: 'test-data.json' });
+    const msg = `Local file read OK!\n\n${JSON.stringify(data, null, 2)}`;
+    alert(msg);
+    console.log('test-data.json:', data);
+  } catch (err) {
+    alert('Failed to read local file: ' + err);
+  }
+}
+
 // ── Init ───────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
-  // Wire up buttons
   document.getElementById('btn-open-repo').addEventListener('click', promptOpenRepo);
   document.getElementById('btn-landing-open').addEventListener('click', promptOpenRepo);
+  document.getElementById('btn-test-local').addEventListener('click', testLocalJson);
   document.getElementById('btn-fit').addEventListener('click', () => cy?.fit());
   document.getElementById('btn-relayout').addEventListener('click', runLayout);
 
   initTerminal();
   initResizeHandle();
 
-  // Check for CLI arg
   const argPath = await invoke('get_repo_from_args');
   if (argPath) {
     openRepo(argPath);

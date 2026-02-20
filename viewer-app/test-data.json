@@ -1,0 +1,11 @@
+{
+  "test": true,
+  "message": "If you can see this, the app successfully read a local JSON file!",
+  "timestamp": "2026-02-20T00:00:00Z",
+  "company": "Test Corp",
+  "people": [
+    { "name": "Alice Johnson", "title": "CEO", "level": "ceo" },
+    { "name": "Bob Smith", "title": "CTO", "level": "c_suite", "reports_to": "Alice Johnson" },
+    { "name": "Carol Chen", "title": "VP Engineering", "level": "vp", "reports_to": "Bob Smith" }
+  ]
+}

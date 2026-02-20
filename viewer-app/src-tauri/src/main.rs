@@ -1,8 +1,34 @@
 // Keep console visible for now so we can see errors
 // TODO: re-enable once stable: #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
-use std::io::Write;
+use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex};
+use tauri::Emitter;
+
+// ── Read a JSON file relative to the exe ───────────────────────────────────
+
+#[tauri::command]
+fn read_local_json(filename: String) -> Result<serde_json::Value, String> {
+    let exe_dir = std::env::current_exe()
+        .map_err(|e| format!("Failed to get exe path: {}", e))?
+        .parent()
+        .ok_or("Failed to get exe directory")?
+        .to_path_buf();
+
+    let path = exe_dir.join(&filename);
+    eprintln!("Reading local file: {}", path.display());
+
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+
+    serde_json::from_str(&content)
+        .map_err(|e| format!("Failed to parse {}: {}", filename, e))
+}
+
+// ── Read company data from a repo path ─────────────────────────────────────
+
 #[tauri::command]
 fn read_company_data(repo_path: String) -> Result<serde_json::Value, String> {
     let base = PathBuf::from(&repo_path);
@@ -14,7 +40,6 @@ fn read_company_data(repo_path: String) -> Result<serde_json::Value, String> {
 
     let mut result = serde_json::Map::new();
 
-    // Read each data file, returning null for missing optional files
     let files = vec![
         ("org_chart", "org_chart.json"),
         ("company_config", "company_config.json"),
@@ -36,7 +61,6 @@ fn read_company_data(repo_path: String) -> Result<serde_json::Value, String> {
         }
     }
 
-    // Scan for KNOWLEDGE_LOG.md files in engagement dirs
     let mut knowledge_entries: Vec<serde_json::Value> = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&base) {
         for entry in entries.flatten() {
@@ -93,7 +117,6 @@ fn parse_knowledge_log(
 
     for line in content.lines() {
         if line.starts_with("## ") && !line.starts_with("### ") {
-            // Date header
             if in_entry {
                 push_entry(
                     entries, engagement, workstream, &current_date,
@@ -168,8 +191,105 @@ fn get_repo_from_args() -> Option<String> {
     std::env::args().nth(1)
 }
 
+// ── Terminal (spawn wsl.exe and pipe I/O) ──────────────────────────────────
+
+struct TerminalProcess {
+    stdin: std::process::ChildStdin,
+}
+
+type TerminalState = Arc<Mutex<Option<TerminalProcess>>>;
+
+#[tauri::command]
+fn spawn_terminal(state: tauri::State<'_, TerminalState>, app: tauri::AppHandle) -> Result<(), String> {
+    let mut guard = state.lock().map_err(|e| e.to_string())?;
+    if guard.is_some() {
+        return Ok(()); // Already running
+    }
+
+    eprintln!("Spawning terminal process...");
+
+    // Try wsl.exe first, fall back to cmd.exe
+    let (program, args): (&str, &[&str]) = if cfg!(target_os = "windows") {
+        // Check if wsl.exe exists
+        if std::path::Path::new("C:\\Windows\\System32\\wsl.exe").exists() {
+            ("wsl.exe", &[])
+        } else {
+            ("cmd.exe", &[])
+        }
+    } else {
+        ("bash", &[])
+    };
+
+    eprintln!("Using shell: {}", program);
+
+    let mut child = Command::new(program)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to spawn {}: {}", program, e))?;
+
+    let stdin = child.stdin.take().ok_or("Failed to get stdin")?;
+    let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
+    let stderr = child.stderr.take().ok_or("Failed to get stderr")?;
+
+    *guard = Some(TerminalProcess { stdin });
+
+    // Stream stdout to frontend
+    let app_stdout = app.clone();
+    std::thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines() {
+            match line {
+                Ok(text) => {
+                    let _ = app_stdout.emit("terminal-output", format!("{}\r\n", text));
+                }
+                Err(_) => break,
+            }
+        }
+        let _ = app_stdout.emit("terminal-output", "\r\n[Process exited]\r\n".to_string());
+    });
+
+    // Stream stderr to frontend
+    let app_stderr = app.clone();
+    std::thread::spawn(move || {
+        let reader = BufReader::new(stderr);
+        for line in reader.lines() {
+            match line {
+                Ok(text) => {
+                    let _ = app_stderr.emit("terminal-output", format!("{}\r\n", text));
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    // Wait for child to exit in background
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+fn write_terminal(state: tauri::State<'_, TerminalState>, data: String) -> Result<(), String> {
+    let mut guard = state.lock().map_err(|e| e.to_string())?;
+    if let Some(ref mut proc) = *guard {
+        proc.stdin
+            .write_all(data.as_bytes())
+            .map_err(|e| format!("Write failed: {}", e))?;
+        proc.stdin.flush().map_err(|e| format!("Flush failed: {}", e))?;
+        Ok(())
+    } else {
+        Err("No terminal process running".to_string())
+    }
+}
+
+// ── Main ───────────────────────────────────────────────────────────────────
+
 fn main() {
-    // Log to file next to the exe for debugging
     let log_path = std::env::current_exe()
         .unwrap_or_default()
         .parent()
@@ -189,11 +309,20 @@ fn main() {
 
     log("Starting sl-ot-viewer...");
 
+    let terminal_state: TerminalState = Arc::new(Mutex::new(None));
+
     let result = tauri::Builder::default()
+        .manage(terminal_state)
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![read_company_data, get_repo_from_args])
+        .invoke_handler(tauri::generate_handler![
+            read_company_data,
+            read_local_json,
+            get_repo_from_args,
+            spawn_terminal,
+            write_terminal,
+        ])
         .run(tauri::generate_context!());
 
     match result {
@@ -201,7 +330,6 @@ fn main() {
         Err(e) => {
             let msg = format!("Application error: {}", e);
             log(&msg);
-            // Keep console open so user can read the error
             eprintln!("\nPress Enter to exit...");
             let _ = std::io::stdin().read_line(&mut String::new());
         }
