@@ -35,16 +35,5 @@
       }
     }
   },
-  "plugins": {
-    "fs": {
-      "scope": {
-        "allow": [
-          { "path": "**" }
-        ]
-      }
-    },
-    "shell": {
-      "open": true
-    }
-  }
+  "plugins": {}
 }
