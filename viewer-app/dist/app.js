@@ -1,6 +1,31 @@
+// Debug: log everything to the console (visible in the terminal behind the app)
+window.onerror = (msg, src, line, col, err) => {
+  document.title = `ERROR: ${msg}`;
+  console.error(`[JS ERROR] ${msg} at ${src}:${line}:${col}`, err);
+};
+window.addEventListener('unhandledrejection', (e) => {
+  document.title = `REJECTED: ${e.reason}`;
+  console.error('[UNHANDLED REJECTION]', e.reason);
+});
+
+console.log('[INIT] app.js loaded');
+console.log('[INIT] window.__TAURI__:', typeof window.__TAURI__, window.__TAURI__);
+
+if (!window.__TAURI__) {
+  document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('landing').innerHTML = `
+      <h2 style="color: #e05050;">Tauri API not available</h2>
+      <p>window.__TAURI__ is undefined. Check withGlobalTauri config.</p>
+    `;
+  });
+  throw new Error('window.__TAURI__ not available');
+}
+
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 const { open } = window.__TAURI__.dialog;
+
+console.log('[INIT] Tauri APIs loaded — invoke:', typeof invoke, 'listen:', typeof listen, 'open:', typeof open);
 
 // ── State ──────────────────────────────────────────────────────────────────
 let cy = null;
@@ -380,10 +405,12 @@ function initTerminal() {
   });
 
   // Auto-spawn the terminal process
+  console.log('[TERM] Spawning terminal...');
   term.writeln('\x1b[90mConnecting to shell...\x1b[0m\r\n');
   invoke('spawn_terminal').then(() => {
-    // Terminal spawned — output will arrive via events
+    console.log('[TERM] spawn_terminal succeeded');
   }).catch((err) => {
+    console.error('[TERM] spawn_terminal failed:', err);
     term.writeln(`\x1b[31mFailed to start shell: ${err}\x1b[0m`);
     term.writeln('\x1b[90mThis feature requires WSL on Windows.\x1b[0m');
   });
@@ -444,12 +471,15 @@ async function promptOpenRepo() {
 
 // ── Test: read local JSON ──────────────────────────────────────────────────
 async function testLocalJson() {
+  console.log('[TEST] testLocalJson called');
   try {
+    console.log('[TEST] Invoking read_local_json...');
     const data = await invoke('read_local_json', { filename: 'test-data.json' });
+    console.log('[TEST] Success:', data);
     const msg = `Local file read OK!\n\n${JSON.stringify(data, null, 2)}`;
     alert(msg);
-    console.log('test-data.json:', data);
   } catch (err) {
+    console.error('[TEST] Failed:', err);
     alert('Failed to read local file: ' + err);
   }
 }
